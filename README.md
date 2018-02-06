@@ -1,8 +1,12 @@
 [![Build Status](https://travis-ci.org/stellar/stellar-core.svg?branch=auto)](https://travis-ci.org/stellar/stellar-core)
 
+# Kinesis Development
 
+Run `sh dev/start.sh` to get started, and follow the echo'd instructions
+
+auto
 # stellar-core
-
+Please build.
 Stellar-core is a replicated state machine that maintains a local copy of a cryptographic ledger and processes transactions against it, in consensus with a set of peers.
 It implements the [Stellar Consensus Protocol](https://github.com/stellar/stellar-core/blob/master/src/scp/readme.md), a _federated_ consensus protocol.
 It is written in C++11 and runs on Linux, OSX and Windows.

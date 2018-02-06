@@ -114,6 +114,12 @@ Upgrades::createUpgradesFor(LedgerHeader const& header) const
         result.emplace_back(LEDGER_UPGRADE_BASE_RESERVE);
         result.back().newBaseReserve() = *mParams.mBaseReserve;
     }
+    if (mParams.mBasePercentageFee &&
+        (header.basePercentageFee != *mParams.mBasePercentageFee))
+    {
+        result.emplace_back(LEDGER_UPGRADE_BASE_PERCENTAGE_FEE);
+        result.back().newBasePercentageFee() = *mParams.mBasePercentageFee;
+    }
 
     return result;
 }
@@ -134,6 +140,9 @@ Upgrades::applyTo(LedgerUpgrade const& upgrade, LedgerHeader& header)
         break;
     case LEDGER_UPGRADE_BASE_RESERVE:
         header.baseReserve = upgrade.newBaseReserve();
+        break;
+    case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+        header.basePercentageFee = upgrade.newBasePercentageFee();
         break;
     default:
     {
@@ -156,6 +165,9 @@ Upgrades::toString(LedgerUpgrade const& upgrade)
         return fmt::format("maxtxsetsize={0}", upgrade.newMaxTxSetSize());
     case LEDGER_UPGRADE_BASE_RESERVE:
         return fmt::format("basereserve={0}", upgrade.newBaseReserve());
+    case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+        return fmt::format("basepercentagefee={0}",
+                           upgrade.newBasePercentageFee());
     default:
         return "<unsupported>";
     }
@@ -180,6 +192,7 @@ Upgrades::toString() const
     appendInfo("protocolversion", mParams.mProtocolVersion);
     appendInfo("basefee", mParams.mBaseFee);
     appendInfo("basereserve", mParams.mBaseReserve);
+    appendInfo("basepercentagefee", mParams.mBasePercentageFee);
     appendInfo("maxtxsize", mParams.mMaxTxSize);
 
     return r.str();
@@ -226,6 +239,9 @@ Upgrades::removeUpgrades(std::vector<UpgradeType>::const_iterator beginUpdates,
             break;
         case LEDGER_UPGRADE_BASE_RESERVE:
             resetParam(res.mBaseReserve, lu.newBaseReserve());
+            break;
+        case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+            resetParam(res.mBasePercentageFee, lu.newBasePercentageFee());
             break;
         default:
             // skip unknown
@@ -280,6 +296,17 @@ Upgrades::isValid(uint64_t closeTime, UpgradeType const& upgrade,
             res = mParams.mBaseFee && (newFee == *mParams.mBaseFee);
         }
         res = res && (newFee != 0);
+    }
+    break;
+    case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+    {
+        uint32 newPercentageFee = lupgrade.newBasePercentageFee();
+        if (nomination)
+        {
+            res = mParams.mBasePercentageFee &&
+                  (newPercentageFee == *mParams.mBasePercentageFee);
+        }
+        res = res && (newPercentageFee != 0);
     }
     break;
     case LEDGER_UPGRADE_MAX_TX_SET_SIZE:
