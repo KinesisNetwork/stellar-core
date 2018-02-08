@@ -19,4 +19,4 @@ RUN mkdir /overwrite-bin \
 ENV PATH="/overwrite-bin:${PATH}" CXX="g++" CC="gcc"
 
 WORKDIR /usr/src
-ENTRYPOINT ./autogen.sh ; ./configure ; bash
+CMD ["bash"]

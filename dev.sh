@@ -3,5 +3,7 @@
 git submodule init
 git submodule update
 
-# docker pull abxit/stellar-core-dev
+echo "Run ./autogen.sh && ./configure to finalise the setup"
+echo "Compile using make. Ensure to do a full rm of the stellar stack to deploy changes"
 docker run -v $(pwd):/usr/src -w /usr/src -it abxit/stellar-core-dev
+
