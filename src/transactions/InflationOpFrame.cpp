@@ -88,11 +88,12 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
 
     int64 toDoleThisWinner = amountToDole;
 
-    AccountID feeDestination = KeyUtils::fromStrKey<PublicKey>("GDCYIYZZ4PLDRAI4QC6OJPODWFEJGY5HZA72F6BJ3FX726PR3FPXUTSY");
+    AccountID feeDestination = KeyUtils::fromStrKey<PublicKey>(
+        "GDCYIYZZ4PLDRAI4QC6OJPODWFEJGY5HZA72F6BJ3FX726PR3FPXUTSY");
     AccountFrame::pointer winner;
-    winner =
-        AccountFrame::loadAccount(inflationDelta, feeDestination, db);
-    if (winner) {
+    winner = AccountFrame::loadAccount(inflationDelta, feeDestination, db);
+    if (winner)
+    {
         if (ledgerManager.getCurrentLedgerVersion() <= 7)
         {
             lcl.totalCoins += toDoleThisWinner;
