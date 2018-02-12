@@ -295,7 +295,7 @@ TEST_CASE("inflation", "[tx][inflation]")
 
             auto txFrame = root.tx({inflation()});
 
-            closeLedgerOn(*app, 4, 7, 7, 2014, {txFrame});
+            closeLedgerOn(*app, 4, 1, 7, 2014, {txFrame});
             REQUIRE(
                 app->getLedgerManager().getCurrentLedgerHeader().inflationSeq ==
                 1);
@@ -311,7 +311,7 @@ TEST_CASE("inflation", "[tx][inflation]")
                 app->getLedgerManager().getCurrentLedgerHeader().inflationSeq ==
                 2);
 
-            closeLedgerOn(*app, 6, 14, 7, 2014);
+            closeLedgerOn(*app, 6, 8, 7, 2014);
             REQUIRE_THROWS_AS(root.inflation(), ex_INFLATION_NOT_TIME);
             REQUIRE(
                 app->getLedgerManager().getCurrentLedgerHeader().inflationSeq ==
@@ -323,7 +323,7 @@ TEST_CASE("inflation", "[tx][inflation]")
                 app->getLedgerManager().getCurrentLedgerHeader().inflationSeq ==
                 3);
 
-            closeLedgerOn(*app, 8, 21, 7, 2014);
+            closeLedgerOn(*app, 8, 15, 7, 2014);
             REQUIRE_THROWS_AS(root.inflation(), ex_INFLATION_NOT_TIME);
             REQUIRE(
                 app->getLedgerManager().getCurrentLedgerHeader().inflationSeq ==
@@ -355,7 +355,7 @@ TEST_CASE("inflation", "[tx][inflation]")
                       {voter1tx, voter2tx, target1tx, target2tx});
 
         clh = app->getLedgerManager().getCurrentLedgerHeader();
-        REQUIRE(clh.feePool == 1000000299);
+        REQUIRE(clh.feePool == (999999999 + 3 * 100));
         REQUIRE(clh.totalCoins == 1000000000000000000);
 
         auto t1Public = target1.getPublicKey();
@@ -369,7 +369,7 @@ TEST_CASE("inflation", "[tx][inflation]")
                       {setInflationDestination1, setInflationDestination2});
 
         clh = app->getLedgerManager().getCurrentLedgerHeader();
-        REQUIRE(clh.feePool == 1000000499);
+        REQUIRE(clh.feePool == (999999999 + 5 * 100));
         REQUIRE(clh.totalCoins == 1000000000000000000);
 
         auto beforeInflationRoot = root.getBalance();
