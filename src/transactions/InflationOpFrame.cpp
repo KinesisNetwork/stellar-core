@@ -10,7 +10,6 @@
 #include "medida/meter.h"
 #include "medida/metrics_registry.h"
 #include "overlay/StellarXDR.h"
-#include "util/Logging.h"
 
 const uint32_t INFLATION_FREQUENCY = (60); // every 7 days
 // inflation is .000190721 per 7 days, or 1% a year
