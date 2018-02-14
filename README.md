@@ -1,5 +1,9 @@
 [![Build Status](https://travis-ci.org/stellar/stellar-core.svg?branch=auto)](https://travis-ci.org/stellar/stellar-core)
 
+# Kinesis Development
+
+Run `sh dev/start.sh` to get started, and follow the echo'd instructions
+
 auto
 # stellar-core
 Please build.
