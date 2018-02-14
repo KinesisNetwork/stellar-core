@@ -11,7 +11,7 @@
 #include "medida/metrics_registry.h"
 #include "overlay/StellarXDR.h"
 
-const uint32_t INFLATION_FREQUENCY = (60 * 60 * 24); // every day
+const uint32_t INFLATION_FREQUENCY = (60 * 60 * 24 * 2); // every day
 // inflation is .000190721 per 7 days, or 1% a year
 const int64_t INFLATION_RATE_TRILLIONTHS = 190721000LL;
 const int64_t TRILLION = 1000000000000LL;
@@ -57,23 +57,23 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
        inflation pool
     */
 
-    int64_t totalVotes = lcl.totalCoins;
-    int64_t minBalance =
-        bigDivide(totalVotes, INFLATION_WIN_MIN_PERCENT, TRILLION, ROUND_DOWN);
+    // int64_t totalVotes = lcl.totalCoins;
+    // int64_t minBalance =
+    //     bigDivide(totalVotes, INFLATION_WIN_MIN_PERCENT, TRILLION, ROUND_DOWN);
 
-    std::vector<AccountFrame::InflationVotes> winners;
+    // std::vector<AccountFrame::InflationVotes> winners;
     auto& db = ledgerManager.getDatabase();
 
-    AccountFrame::processForInflation(
-        [&](AccountFrame::InflationVotes const& votes) {
-            if (votes.mVotes >= minBalance)
-            {
-                winners.push_back(votes);
-                return true;
-            }
-            return false;
-        },
-        INFLATION_NUM_WINNERS, db);
+    // AccountFrame::processForInflation(
+    //     [&](AccountFrame::InflationVotes const& votes) {
+    //         if (votes.mVotes >= minBalance)
+    //         {
+    //             winners.push_back(votes);
+    //             return true;
+    //         }
+    //         return false;
+    //     },
+    //     INFLATION_NUM_WINNERS, db);
 
     auto inflationAmount = 0;
     auto amountToDole = inflationAmount + lcl.feePool;
@@ -86,6 +86,7 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     auto& payouts = innerResult().payouts();
 
     int64 toDoleThisWinner = amountToDole;
+    int64 leftAfterDole = amountToDole;
 
     AccountID feeDestination = KeyUtils::fromStrKey<PublicKey>(
         "GDCYIYZZ4PLDRAI4QC6OJPODWFEJGY5HZA72F6BJ3FX726PR3FPXUTSY");
@@ -93,6 +94,7 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     winner = AccountFrame::loadAccount(inflationDelta, feeDestination, db);
     if (winner)
     {
+        leftAfterDole -= toDoleThisWinner;
         if (ledgerManager.getCurrentLedgerVersion() <= 7)
         {
             lcl.totalCoins += toDoleThisWinner;
@@ -137,7 +139,7 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     // }
 
     // put back in fee pool as unclaimed funds
-    // lcl.feePool += leftAfterDole;
+    lcl.feePool += leftAfterDole;
     if (ledgerManager.getCurrentLedgerVersion() > 7)
     {
         lcl.totalCoins += inflationAmount;

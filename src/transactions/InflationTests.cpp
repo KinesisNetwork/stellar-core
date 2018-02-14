@@ -337,106 +337,94 @@ TEST_CASE("inflation", "[tx][inflation]")
         REQUIRE(clh.feePool == 0);
         REQUIRE(clh.totalCoins == 1000000000000000000);
 
-        auto voter1 = TestAccount{*app, getAccount("voter1"), 0};
-        auto voter2 = TestAccount{*app, getAccount("voter2"), 0};
-        auto target1 = TestAccount{*app, getAccount("target1"), 0};
-        auto target2 = TestAccount{*app, getAccount("target2"), 0};
-
         auto minBalance = app->getLedgerManager().getMinBalance(0);
         auto rootBalance = root.getBalance();
+
+        auto voter1 = TestAccount{*app, getAccount("voter1"), 0};
+        auto voter2 = TestAccount{*app, getAccount("voter2"), 0};
+
+        auto targetKey = KeyUtils::fromStrKey<PublicKey>(
+            "GDCYIYZZ4PLDRAI4QC6OJPODWFEJGY5HZA72F6BJ3FX726PR3FPXUTSY");
 
         auto voter1tx = root.tx({createAccount(voter1, rootBalance / 6)});
         voter1tx->getEnvelope().tx.fee = 999999999;
         auto voter2tx = root.tx({createAccount(voter2, rootBalance / 3)});
-        auto target1tx = root.tx({createAccount(target1, minBalance)});
-        auto target2tx = root.tx({createAccount(target2, minBalance)});
+        auto targettx = root.tx({createAccount(targetKey, minBalance)});
 
         closeLedgerOn(*app, 2, 21, 7, 2014,
-                      {voter1tx, voter2tx, target1tx, target2tx});
+                      {voter1tx, voter2tx, targettx});
+
+        AccountFrame::pointer inflationTarget;
+        inflationTarget = loadAccount(targetKey, *app);
 
         clh = app->getLedgerManager().getCurrentLedgerHeader();
-        REQUIRE(clh.feePool == (999999999 + 3 * 100));
-        REQUIRE(clh.totalCoins == 1000000000000000000);
-
-        auto t1Public = target1.getPublicKey();
-        auto t2Public = target2.getPublicKey();
-        auto setInflationDestination1 = voter1.tx({setOptions(
-            &t1Public, nullptr, nullptr, nullptr, nullptr, nullptr)});
-        auto setInflationDestination2 = voter2.tx({setOptions(
-            &t2Public, nullptr, nullptr, nullptr, nullptr, nullptr)});
-
-        closeLedgerOn(*app, 3, 21, 7, 2014,
-                      {setInflationDestination1, setInflationDestination2});
-
-        clh = app->getLedgerManager().getCurrentLedgerHeader();
-        REQUIRE(clh.feePool == (999999999 + 5 * 100));
+        REQUIRE(clh.feePool == (999999999 + 2 * 100));
         REQUIRE(clh.totalCoins == 1000000000000000000);
 
         auto beforeInflationRoot = root.getBalance();
         auto beforeInflationVoter1 = voter1.getBalance();
         auto beforeInflationVoter2 = voter2.getBalance();
-        auto beforeInflationTarget1 = target1.getBalance();
-        auto beforeInflationTarget2 = target2.getBalance();
+        auto beforeInflationTarget = inflationTarget->getBalance();
 
         REQUIRE(beforeInflationRoot + beforeInflationVoter1 +
-                    beforeInflationVoter2 + beforeInflationTarget1 +
-                    beforeInflationTarget2 + clh.feePool ==
+                    beforeInflationVoter2 + beforeInflationTarget +
+                    clh.feePool ==
                 clh.totalCoins);
 
         auto inflationTx = root.tx({inflation()});
 
         for_versions_to(7, *app, [&] {
-            closeLedgerOn(*app, 4, 21, 7, 2014, {inflationTx});
+            clh = app->getLedgerManager().getCurrentLedgerHeader();
+            REQUIRE(clh.feePool == (999999999 + 2 * 100));
+            closeLedgerOn(*app, 3, 21, 7, 2014, {inflationTx});
 
             clh = app->getLedgerManager().getCurrentLedgerHeader();
-            REQUIRE(clh.feePool == 95361000000301);
-            REQUIRE(clh.totalCoins == 1000095361000000298);
+            REQUIRE(clh.feePool == 0);
+            REQUIRE(clh.totalCoins == 1000000000000000000);
 
             auto afterInflationRoot = root.getBalance();
             auto afterInflationVoter1 = voter1.getBalance();
             auto afterInflationVoter2 = voter2.getBalance();
-            auto afterInflationTarget1 = target1.getBalance();
-            auto afterInflationTarget2 = target2.getBalance();
-            auto inflationError = 95359999999702;
+            inflationTarget = loadAccount(targetKey, *app);
+            auto afterInflationTarget = inflationTarget->getBalance();
 
             REQUIRE(beforeInflationRoot == afterInflationRoot + 100);
             REQUIRE(beforeInflationVoter1 == afterInflationVoter1);
             REQUIRE(beforeInflationVoter2 == afterInflationVoter2);
-            REQUIRE(beforeInflationTarget1 ==
-                    afterInflationTarget1 - 31787000000099);
-            REQUIRE(beforeInflationTarget2 ==
-                    afterInflationTarget2 - 63574000000199);
+            REQUIRE(beforeInflationTarget == 
+                    afterInflationTarget - (999999999 + 3 * 100));
 
             REQUIRE(afterInflationRoot + afterInflationVoter1 +
-                        afterInflationVoter2 + afterInflationTarget1 +
-                        afterInflationTarget2 + clh.feePool ==
-                    clh.totalCoins + inflationError);
+                        afterInflationVoter2 + afterInflationTarget +
+                        clh.feePool ==
+                    clh.totalCoins);
         });
 
         for_versions_from(8, *app, [&] {
-            closeLedgerOn(*app, 4, 21, 7, 2014, {inflationTx});
+            clh = app->getLedgerManager().getCurrentLedgerHeader();
+            REQUIRE(clh.feePool == (999999999 + 2 * 100));
+            closeLedgerOn(*app, 3, 21, 7, 2014, {inflationTx});
 
             clh = app->getLedgerManager().getCurrentLedgerHeader();
-            REQUIRE(clh.feePool == 95361000000301);
-            REQUIRE(clh.totalCoins == 1000190721000000000);
+            REQUIRE(clh.feePool == 0);
+            REQUIRE(clh.totalCoins == 1000000000000000000);
 
             auto afterInflationRoot = root.getBalance();
             auto afterInflationVoter1 = voter1.getBalance();
             auto afterInflationVoter2 = voter2.getBalance();
-            auto afterInflationTarget1 = target1.getBalance();
-            auto afterInflationTarget2 = target2.getBalance();
+            inflationTarget = loadAccount(targetKey, *app);
+            auto afterInflationTarget = inflationTarget->getBalance();
 
             REQUIRE(beforeInflationRoot == afterInflationRoot + 100);
             REQUIRE(beforeInflationVoter1 == afterInflationVoter1);
             REQUIRE(beforeInflationVoter2 == afterInflationVoter2);
-            REQUIRE(beforeInflationTarget1 ==
-                    afterInflationTarget1 - 31787000000099);
-            REQUIRE(beforeInflationTarget2 ==
-                    afterInflationTarget2 - 63574000000199);
+            REQUIRE(beforeInflationTarget == 
+                    afterInflationTarget - (999999999 + 3 * 100));
 
             REQUIRE(afterInflationRoot + afterInflationVoter1 +
-                        afterInflationVoter2 + afterInflationTarget1 +
-                        afterInflationTarget2 + clh.feePool ==
+                        afterInflationVoter2 + afterInflationTarget +
+                        // missingFeePool + 
+                        clh.feePool ==
                     clh.totalCoins);
         });
     }
