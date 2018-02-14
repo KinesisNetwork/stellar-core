@@ -19,24 +19,12 @@ docker run --name pgstellar --rm -d postgres:9.6
 # Wait for the DB to boot
 sleep 15
 
-# Create the needed DBs. Dirty but effective
+# Create the needed DBs
 docker exec --user postgres pgstellar psql -c "create database test;"
-docker exec --user postgres pgstellar psql -c "create database test0;"
-docker exec --user postgres pgstellar psql -c "create database test1;"
-docker exec --user postgres pgstellar psql -c "create database test2;"
-docker exec --user postgres pgstellar psql -c "create database test3;"
-docker exec --user postgres pgstellar psql -c "create database test4;"
-docker exec --user postgres pgstellar psql -c "create database test5;"
-docker exec --user postgres pgstellar psql -c "create database test6;"
-docker exec --user postgres pgstellar psql -c "create database test7;"
-docker exec --user postgres pgstellar psql -c "create database test8;"
-docker exec --user postgres pgstellar psql -c "create database test9;"
-docker exec --user postgres pgstellar psql -c "create database test10;"
-docker exec --user postgres pgstellar psql -c "create database test11;"
-docker exec --user postgres pgstellar psql -c "create database test12;"
-docker exec --user postgres pgstellar psql -c "create database test13;"
-docker exec --user postgres pgstellar psql -c "create database test14;"
-docker exec --user postgres pgstellar psql -c "create database test15;"
+for i in $(seq 0 15)
+do
+    docker exec --user postgres pgstellar psql -c "create database test$i;"
+done
 
 docker run -v $(pwd):/usr/src -e PGHOST=pgstellar -e PGUSER=postgres --link pgstellar -w /usr/src -it abxit/stellar-core-dev sh -c "useradd $USER \
     && su $USER -c sh -c \"cd /usr/src && source ./dev/permission_setup.sh \
