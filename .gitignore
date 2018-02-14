@@ -23,6 +23,7 @@
 # text editors
 *~
 *.swp
+.vscode
 
 .libs
 .deps
@@ -67,11 +68,13 @@
 /src/src.mk
 /lib/medida.mk
 /lib/lib.mk
+/docs/stellar-core.1
 
 # test output
 /stellar-core-test-*
 /fuzz-findings/
 /my-history/
+/src/testdata
 
 # Windows specific
 **/Build/*
