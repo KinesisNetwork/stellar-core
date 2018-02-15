@@ -59,7 +59,8 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
 
     // int64_t totalVotes = lcl.totalCoins;
     // int64_t minBalance =
-    //     bigDivide(totalVotes, INFLATION_WIN_MIN_PERCENT, TRILLION, ROUND_DOWN);
+    //     bigDivide(totalVotes, INFLATION_WIN_MIN_PERCENT, TRILLION,
+    //     ROUND_DOWN);
 
     // std::vector<AccountFrame::InflationVotes> winners;
     auto& db = ledgerManager.getDatabase();

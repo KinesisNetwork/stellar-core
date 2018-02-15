@@ -111,8 +111,7 @@ TEST_CASE("inflation", "[tx][inflation]")
         auto voter2tx = root.tx({createAccount(voter2, rootBalance / 3)});
         auto targettx = root.tx({createAccount(targetKey, minBalance)});
 
-        closeLedgerOn(*app, 2, 21, 7, 2014,
-                      {voter1tx, voter2tx, targettx});
+        closeLedgerOn(*app, 2, 21, 7, 2014, {voter1tx, voter2tx, targettx});
 
         AccountFrame::pointer inflationTarget;
         inflationTarget = loadAccount(targetKey, *app);
@@ -151,7 +150,7 @@ TEST_CASE("inflation", "[tx][inflation]")
             REQUIRE(beforeInflationRoot == afterInflationRoot + 100);
             REQUIRE(beforeInflationVoter1 == afterInflationVoter1);
             REQUIRE(beforeInflationVoter2 == afterInflationVoter2);
-            REQUIRE(beforeInflationTarget == 
+            REQUIRE(beforeInflationTarget ==
                     afterInflationTarget - (999999999 + 3 * 100));
 
             REQUIRE(afterInflationRoot + afterInflationVoter1 +
@@ -178,12 +177,11 @@ TEST_CASE("inflation", "[tx][inflation]")
             REQUIRE(beforeInflationRoot == afterInflationRoot + 100);
             REQUIRE(beforeInflationVoter1 == afterInflationVoter1);
             REQUIRE(beforeInflationVoter2 == afterInflationVoter2);
-            REQUIRE(beforeInflationTarget == 
+            REQUIRE(beforeInflationTarget ==
                     afterInflationTarget - (999999999 + 3 * 100));
 
             REQUIRE(afterInflationRoot + afterInflationVoter1 +
                         afterInflationVoter2 + afterInflationTarget +
-                        // missingFeePool + 
                         clh.feePool ==
                     clh.totalCoins);
         });
