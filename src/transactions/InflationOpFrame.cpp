@@ -96,10 +96,10 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     if (winner)
     {
         leftAfterDole -= toDoleThisWinner;
-        if (ledgerManager.getCurrentLedgerVersion() <= 7)
-        {
-            lcl.totalCoins += toDoleThisWinner;
-        }
+        /* if (ledgerManager.getCurrentLedgerVersion() <= 7) */
+        /* { */
+        /*     lcl.totalCoins += toDoleThisWinner; */
+        /* } */
         if (!winner->addBalance(toDoleThisWinner))
         {
             throw std::runtime_error(
