@@ -91,7 +91,7 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     int64 leftAfterDole = amountToDole;
 
     char* feePublicKey;
-    feePublicKey = getenv ("FEE_PUBLIC_KEY");
+    feePublicKey = getenv("FEE_PUBLIC_KEY");
 
     AccountID feeDestination = KeyUtils::fromStrKey<PublicKey>(feePublicKey);
     AccountFrame::pointer winner;
