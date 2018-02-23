@@ -72,8 +72,5 @@ then
     git diff
     exit 1
 fi
-make -j3
-ccache -s
-export ALL_VERSIONS=1
-make check
 
+sh dev/test.sh
