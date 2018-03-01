@@ -34,11 +34,11 @@ function newdb() {
     rm -rf /data/*
 
     dropdb stellar || true
-    createdb stellar
+    createdb stellar || true
 
     if [[ -n "${HORIZON_PASSWORD}" ]]; then
       dropuser horizon || true
-      createuser horizon
+      createuser horizon || true
       psql -c "alter user horizon with password '${HORIZON_PASSWORD}'"
       psql >/dev/null <<-SQL
          GRANT CONNECT ON DATABASE stellar to horizon;
