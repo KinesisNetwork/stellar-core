@@ -3,6 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "transactions/InflationOpFrame.h"
+#include "crypto/SHA.h"
 #include "ledger/AccountFrame.h"
 #include "ledger/LedgerDelta.h"
 #include "ledger/LedgerManager.h"
@@ -10,7 +11,6 @@
 #include "medida/meter.h"
 #include "medida/metrics_registry.h"
 #include "overlay/StellarXDR.h"
-#include <stdlib.h> /* getenv */
 
 const uint32_t INFLATION_FREQUENCY = (60 * 60 * 24 * 7); // every seven days
 // inflation is .000190721 per 7 days, or 1% a year
@@ -87,13 +87,13 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     innerResult().code(INFLATION_SUCCESS);
     auto& payouts = innerResult().payouts();
 
+    Hash seed = sha256(app.getConfig().NETWORK_PASSPHRASE + "feepool");
+    SecretKey feeKey = SecretKey::fromSeed(seed);
+    AccountID feeDestination = feeKey.getPublicKey();
+
     int64 toDoleThisWinner = amountToDole;
     int64 leftAfterDole = amountToDole;
 
-    char* feePublicKey;
-    feePublicKey = getenv("FEE_PUBLIC_KEY");
-
-    AccountID feeDestination = KeyUtils::fromStrKey<PublicKey>(feePublicKey);
     AccountFrame::pointer winner;
     winner = AccountFrame::loadAccount(inflationDelta, feeDestination, db);
     if (winner)

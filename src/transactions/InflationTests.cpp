@@ -2,6 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
+#include "crypto/SHA.h"
 #include "herder/LedgerCloseData.h"
 #include "ledger/LedgerDelta.h"
 #include "ledger/LedgerManager.h"
@@ -103,8 +104,9 @@ TEST_CASE("inflation", "[tx][inflation]")
         auto voter1 = TestAccount{*app, getAccount("voter1"), 0};
         auto voter2 = TestAccount{*app, getAccount("voter2"), 0};
 
-        auto targetKey = KeyUtils::fromStrKey<PublicKey>(
-            "GDCYIYZZ4PLDRAI4QC6OJPODWFEJGY5HZA72F6BJ3FX726PR3FPXUTSY");
+        Hash seed = sha256(app->getConfig().NETWORK_PASSPHRASE + "feepool");
+        SecretKey feeKey = SecretKey::fromSeed(seed);
+        AccountID targetKey = feeKey.getPublicKey();
 
         auto voter1tx = root.tx({createAccount(voter1, rootBalance / 6)});
         voter1tx->getEnvelope().tx.fee = 999999999;
