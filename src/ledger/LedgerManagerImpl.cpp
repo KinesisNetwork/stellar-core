@@ -67,6 +67,7 @@ namespace stellar
 const uint32_t LedgerManager::GENESIS_LEDGER_SEQ = 1;
 const uint32_t LedgerManager::GENESIS_LEDGER_VERSION = 0;
 const uint32_t LedgerManager::GENESIS_LEDGER_BASE_FEE = 100;
+const double LedgerManager::GENESIS_LEDGER_PERCENTAGE_FEE = 0.45;
 const uint32_t LedgerManager::GENESIS_LEDGER_BASE_RESERVE = 100000000;
 const uint32_t LedgerManager::GENESIS_LEDGER_MAX_TX_SIZE = 100;
 const int64_t LedgerManager::GENESIS_LEDGER_TOTAL_COINS = 1000000000000000000;
@@ -173,6 +174,7 @@ LedgerManager::genesisLedger()
     // set the ones that are not 0
     result.ledgerVersion = GENESIS_LEDGER_VERSION;
     result.baseFee = GENESIS_LEDGER_BASE_FEE;
+    result.basePercentageFee = GENESIS_LEDGER_PERCENTAGE_FEE;
     result.baseReserve = GENESIS_LEDGER_BASE_RESERVE;
     result.maxTxSetSize = GENESIS_LEDGER_MAX_TX_SIZE;
     result.totalCoins = GENESIS_LEDGER_TOTAL_COINS;
@@ -303,6 +305,12 @@ uint32_t
 LedgerManagerImpl::getTxFee() const
 {
     return mCurrentLedger->mHeader.baseFee;
+}
+
+double
+LedgerManagerImpl::getTxPercentageFee() const
+{
+    return mCurrentLedger->mHeader.basePercentageFee;
 }
 
 uint32_t

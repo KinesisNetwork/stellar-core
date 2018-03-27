@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <math.h>
 
 namespace stellar
 {
@@ -121,7 +122,34 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
         count = 1;
     }
 
-    return lm.getTxFee() * count;
+    auto baseFee = lm.getTxFee() * count;
+
+    // Here we need to map over the operations, and get our fee for each
+    int64_t accumulatedFeeFromPercentage;
+
+    for (auto& op : mOperations)
+    {   
+        auto operation = op->getOperation();
+        
+        // I just used vscode intellisense here, the types are probably not correct and won't compile
+        if (operation.body._xdr_field_number == 1)
+        {
+            // TODO: Ignore anything that is not a native asset type here
+            // i.e operation.body.paymentOp.amount !== 'XLM', or however those types look
+            auto percentFeeFloat = operation.body.paymentOp.amount * lm.getBasePercentageFee();
+            auto roundedPercentFee = nearbyint(percentFeeFloat);
+            accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
+        }
+
+        if (operation.body._xdr_field_number == 2)
+        {
+            auto percentFeeFloat = operation.body.createAccountOp.startingBalance * lm.getBasePercentageFee();
+            auto roundedPercentFee = nearbyint(percentFeeFloat);
+            accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
+        }
+    }
+
+    return baseFee + accumulatedFeeFromPercentage;
 }
 
 void
@@ -250,6 +278,7 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
         }
     }
 
+    // Look here, this is why the code I have suggested should work
     if (mEnvelope.tx.fee < getMinFee(lm))
     {
         app.getMetrics()
