@@ -119,6 +119,7 @@ class LedgerManager
 
     // Return the fee required to apply a transaction to the current ledger.
     virtual uint32_t getTxFee() const = 0;
+    virtual double getTxPercentageFee() const = 0;
 
     // return the maximum size of a transaction set to apply to the current
     // ledger

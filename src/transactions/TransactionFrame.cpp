@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <numeric>
 #include <math.h>
+#include <stdio.h>
 
 namespace stellar
 {
@@ -125,30 +126,43 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
     auto baseFee = lm.getTxFee() * count;
 
     // Here we need to map over the operations, and get our fee for each
-    int64_t accumulatedFeeFromPercentage;
+    int64_t accumulatedFeeFromPercentage = 0;
 
     for (auto& op : mOperations)
     {   
         auto operation = op->getOperation();
         
-        // I just used vscode intellisense here, the types are probably not correct and won't compile
-        if (operation.body._xdr_field_number == 1)
+        int fieldNumber = operation.body.type();
+        printf("Field Number %d \n", fieldNumber);
+        if (fieldNumber == 0)
         {
             // TODO: Ignore anything that is not a native asset type here
             // i.e operation.body.paymentOp.amount !== 'XLM', or however those types look
-            auto percentFeeFloat = operation.body.paymentOp.amount * lm.getBasePercentageFee();
-            auto roundedPercentFee = nearbyint(percentFeeFloat);
+            printf("Starting balance %ld \n", operation.body.createAccountOp().startingBalance);
+            printf("Tx Percentage Fee %f \n", lm.getTxPercentageFee());
+
+            auto percentFeeFloat = operation.body.createAccountOp().startingBalance * lm.getTxPercentageFee();
+            printf("Percent Fee Float %f \n", percentFeeFloat);
+
+            int64_t roundedPercentFee = (int64_t)percentFeeFloat;
+            printf("Auto rounded Fee %ld \n", roundedPercentFee);
+
             accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
         }
-
-        if (operation.body._xdr_field_number == 2)
+ 
+        if (fieldNumber == 1)
         {
-            auto percentFeeFloat = operation.body.createAccountOp.startingBalance * lm.getBasePercentageFee();
-            auto roundedPercentFee = nearbyint(percentFeeFloat);
+            auto percentFeeFloat = operation.body.paymentOp().amount * lm.getTxPercentageFee();
+            printf("Amount %ld \n", operation.body.paymentOp().amount);
+            printf("Tx Percentage Fee %f \n", lm.getTxPercentageFee());
+            printf("Percent Fee Float %f \n", percentFeeFloat);
+            int64_t roundedPercentFee = (int64_t)percentFeeFloat;
             accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
+            printf("Auto rounded Fee %ld \n", roundedPercentFee);
         }
     }
 
+    printf("Fee FFS %ld \n", baseFee + accumulatedFeeFromPercentage);
     return baseFee + accumulatedFeeFromPercentage;
 }
 
