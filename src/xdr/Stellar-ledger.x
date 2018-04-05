@@ -55,7 +55,7 @@ struct LedgerHeader
     uint64 idPool; // last used global ID, used for generating objects
 
     uint32 baseFee;     // base fee per operation in stroops
-    double basePercentageFee;     // base percentage fee per create account and payment operation
+    uint32 basePercentageFee;     // base percentage fee per create account and payment operation, in basis points
     uint32 baseReserve; // account base reserve in stroops
 
     uint32 maxTxSetSize; // maximum size a transaction set can be

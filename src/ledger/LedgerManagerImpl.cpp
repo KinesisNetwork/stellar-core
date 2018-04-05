@@ -38,7 +38,6 @@
 
 #include <chrono>
 #include <sstream>
-#include <stdio.h>
 
 /*
 The ledger module:
@@ -68,7 +67,7 @@ namespace stellar
 const uint32_t LedgerManager::GENESIS_LEDGER_SEQ = 1;
 const uint32_t LedgerManager::GENESIS_LEDGER_VERSION = 0;
 const uint32_t LedgerManager::GENESIS_LEDGER_BASE_FEE = 100;
-const double LedgerManager::GENESIS_LEDGER_PERCENTAGE_FEE = 0.0045;
+const uint32_t LedgerManager::GENESIS_LEDGER_PERCENTAGE_FEE = 45;
 const uint32_t LedgerManager::GENESIS_LEDGER_BASE_RESERVE = 100000000;
 const uint32_t LedgerManager::GENESIS_LEDGER_MAX_TX_SIZE = 100;
 const int64_t LedgerManager::GENESIS_LEDGER_TOTAL_COINS = 1000000000000000000;
@@ -180,9 +179,6 @@ LedgerManager::genesisLedger()
     result.maxTxSetSize = GENESIS_LEDGER_MAX_TX_SIZE;
     result.totalCoins = GENESIS_LEDGER_TOTAL_COINS;
     result.ledgerSeq = GENESIS_LEDGER_SEQ;
-
-    printf("Genesis percentage fee %f \n", GENESIS_LEDGER_PERCENTAGE_FEE);
-    printf("Result basePercentageFee %f \n", result.basePercentageFee);
 
     return result;
 }
@@ -312,7 +308,7 @@ LedgerManagerImpl::getTxFee() const
     return mCurrentLedger->mHeader.baseFee;
 }
 
-double
+uint32_t
 LedgerManagerImpl::getTxPercentageFee() const
 {
     return mCurrentLedger->mHeader.basePercentageFee;

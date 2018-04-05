@@ -131,6 +131,7 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
     for (auto& op : mOperations)
     {   
         auto operation = op->getOperation();
+        double percentageFeeAsDouble = lm.getTxPercentageFee() / 1000;
         
         int fieldNumber = operation.body.type();
         printf("Field Number %d \n", fieldNumber);
@@ -139,9 +140,9 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
             // TODO: Ignore anything that is not a native asset type here
             // i.e operation.body.paymentOp.amount !== 'XLM', or however those types look
             printf("Starting balance %ld \n", operation.body.createAccountOp().startingBalance);
-            printf("Tx Percentage Fee %f \n", lm.getTxPercentageFee());
+            printf("Tx Percentage Fee %f \n", percentageFeeAsDouble);
 
-            auto percentFeeFloat = operation.body.createAccountOp().startingBalance * lm.getTxPercentageFee();
+            auto percentFeeFloat = operation.body.createAccountOp().startingBalance * percentageFeeAsDouble;
             printf("Percent Fee Float %f \n", percentFeeFloat);
 
             int64_t roundedPercentFee = (int64_t)percentFeeFloat;
@@ -152,9 +153,9 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
  
         if (fieldNumber == 1)
         {
-            auto percentFeeFloat = operation.body.paymentOp().amount * lm.getTxPercentageFee();
+            auto percentFeeFloat = operation.body.paymentOp().amount * percentageFeeAsDouble;
             printf("Amount %ld \n", operation.body.paymentOp().amount);
-            printf("Tx Percentage Fee %f \n", lm.getTxPercentageFee());
+            printf("Tx Percentage Fee %f \n", percentageFeeAsDouble);
             printf("Percent Fee Float %f \n", percentFeeFloat);
             int64_t roundedPercentFee = (int64_t)percentFeeFloat;
             accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
