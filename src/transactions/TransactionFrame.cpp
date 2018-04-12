@@ -124,14 +124,13 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
 
     auto baseFee = lm.getTxFee() * count;
 
-    // Here we need to map over the operations, and get our fee for each
     int64_t accumulatedFeeFromPercentage = 0;
+    double percentageFeeAsDouble =
+        (double)lm.getTxPercentageFee() / (double)10000;
 
     for (auto& op : mOperations)
     {
         auto operation = op->getOperation();
-        double percentageFeeAsDouble =
-            (double)lm.getTxPercentageFee() / (double)10000;
 
         int fieldNumber = operation.body.type();
 
