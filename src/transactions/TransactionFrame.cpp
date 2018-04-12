@@ -29,7 +29,6 @@
 #include <algorithm>
 #include <numeric>
 #include <math.h>
-#include <stdio.h>
 
 namespace stellar
 {
@@ -134,20 +133,11 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
         double percentageFeeAsDouble = (double)lm.getTxPercentageFee() / (double)10000;
         
         int fieldNumber = operation.body.type();
-        printf("Field Number %d \n", fieldNumber);
+
         if (fieldNumber == 0)
         {
-            // TODO: Ignore anything that is not a native asset type here
-            // i.e operation.body.paymentOp.amount !== 'XLM', or however those types look
-            printf("Starting balance %ld \n", operation.body.createAccountOp().startingBalance);
-            printf("Tx Percentage Fee %f \n", percentageFeeAsDouble);
-
             auto percentFeeFloat = operation.body.createAccountOp().startingBalance * percentageFeeAsDouble;
-            printf("Percent Fee Float %f \n", percentFeeFloat);
-
             int64_t roundedPercentFee = (int64_t)percentFeeFloat;
-            printf("Auto rounded Fee %ld \n", roundedPercentFee);
-
             accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
         }
  
@@ -155,19 +145,13 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
         {
             int8_t assetType = operation.body.paymentOp().asset.type(); // 0 is native
             if (assetType == 0) {
-                printf("GetTxPercetFee %ld \n", lm.getTxPercentageFee());
                 auto percentFeeFloat = operation.body.paymentOp().amount * percentageFeeAsDouble;
-                printf("Amount %ld \n", operation.body.paymentOp().amount);
-                printf("Tx Percentage Fee %f \n", percentageFeeAsDouble);
-                printf("Percent Fee Float %f \n", percentFeeFloat);
                 int64_t roundedPercentFee = (int64_t)percentFeeFloat;
                 accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
-                printf("Auto rounded Fee %ld \n", roundedPercentFee);
             }
         }
     }
 
-    printf("Fee FFS %ld \n", baseFee + accumulatedFeeFromPercentage);
     return baseFee + accumulatedFeeFromPercentage;
 }
 
@@ -297,7 +281,6 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
         }
     }
 
-    // Look here, this is why the code I have suggested should work
     if (mEnvelope.tx.fee < getMinFee(lm))
     {
         app.getMetrics()
