@@ -300,7 +300,7 @@ struct Transaction
     AccountID sourceAccount;
 
     // the fee the sourceAccount will pay
-    uint32 fee;
+    uint64 fee;
 
     // sequence number to consume in the account
     SequenceNumber seqNum;
