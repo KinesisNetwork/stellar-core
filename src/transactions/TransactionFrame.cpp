@@ -131,7 +131,7 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
     for (auto& op : mOperations)
     {   
         auto operation = op->getOperation();
-        double percentageFeeAsDouble = lm.getTxPercentageFee() / 1000;
+        double percentageFeeAsDouble = (double)lm.getTxPercentageFee() / (double)10000;
         
         int fieldNumber = operation.body.type();
         printf("Field Number %d \n", fieldNumber);
@@ -153,13 +153,17 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
  
         if (fieldNumber == 1)
         {
-            auto percentFeeFloat = operation.body.paymentOp().amount * percentageFeeAsDouble;
-            printf("Amount %ld \n", operation.body.paymentOp().amount);
-            printf("Tx Percentage Fee %f \n", percentageFeeAsDouble);
-            printf("Percent Fee Float %f \n", percentFeeFloat);
-            int64_t roundedPercentFee = (int64_t)percentFeeFloat;
-            accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
-            printf("Auto rounded Fee %ld \n", roundedPercentFee);
+            int8_t assetType = operation.body.paymentOp().asset.type(); // 0 is native
+            if (assetType == 0) {
+                printf("GetTxPercetFee %ld \n", lm.getTxPercentageFee());
+                auto percentFeeFloat = operation.body.paymentOp().amount * percentageFeeAsDouble;
+                printf("Amount %ld \n", operation.body.paymentOp().amount);
+                printf("Tx Percentage Fee %f \n", percentageFeeAsDouble);
+                printf("Percent Fee Float %f \n", percentFeeFloat);
+                int64_t roundedPercentFee = (int64_t)percentFeeFloat;
+                accumulatedFeeFromPercentage = accumulatedFeeFromPercentage + roundedPercentFee;
+                printf("Auto rounded Fee %ld \n", roundedPercentFee);
+            }
         }
     }
 
