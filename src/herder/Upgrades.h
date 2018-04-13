@@ -32,7 +32,8 @@ class Upgrades
             mProtocolVersion =
                 make_optional<uint32>(cfg.LEDGER_PROTOCOL_VERSION);
             mBaseFee = make_optional<uint32>(cfg.TESTING_UPGRADE_DESIRED_FEE);
-            mBasePercentageFee = make_optional<uint32>(cfg.TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE);
+            mBasePercentageFee = make_optional<uint32>(
+                cfg.TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE);
             mMaxTxSize =
                 make_optional<uint32>(cfg.TESTING_UPGRADE_MAX_TX_PER_LEDGER);
             mBaseReserve = make_optional<uint32>(cfg.TESTING_UPGRADE_RESERVE);

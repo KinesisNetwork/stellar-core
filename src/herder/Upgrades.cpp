@@ -114,7 +114,8 @@ Upgrades::createUpgradesFor(LedgerHeader const& header) const
         result.emplace_back(LEDGER_UPGRADE_BASE_RESERVE);
         result.back().newBaseReserve() = *mParams.mBaseReserve;
     }
-    if (mParams.mBasePercentageFee && (header.basePercentageFee != *mParams.mBasePercentageFee))
+    if (mParams.mBasePercentageFee &&
+        (header.basePercentageFee != *mParams.mBasePercentageFee))
     {
         result.emplace_back(LEDGER_UPGRADE_BASE_PERCENTAGE_FEE);
         result.back().newBasePercentageFee() = *mParams.mBasePercentageFee;
@@ -165,7 +166,8 @@ Upgrades::toString(LedgerUpgrade const& upgrade)
     case LEDGER_UPGRADE_BASE_RESERVE:
         return fmt::format("basereserve={0}", upgrade.newBaseReserve());
     case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
-        return fmt::format("basepercentagefee={0}", upgrade.newBasePercentageFee());
+        return fmt::format("basepercentagefee={0}",
+                           upgrade.newBasePercentageFee());
     default:
         return "<unsupported>";
     }
@@ -301,7 +303,8 @@ Upgrades::isValid(uint64_t closeTime, UpgradeType const& upgrade,
         uint32 newPercentageFee = lupgrade.newBasePercentageFee();
         if (nomination)
         {
-            res = mParams.mBasePercentageFee && (newPercentageFee == *mParams.mBasePercentageFee);
+            res = mParams.mBasePercentageFee &&
+                  (newPercentageFee == *mParams.mBasePercentageFee);
         }
         res = res && (newPercentageFee != 0);
     }
