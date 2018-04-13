@@ -701,12 +701,14 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
         p.mUpgradeTime = VirtualClock::tmToPoint(tm);
 
         uint32 baseFee;
+        uint32 basePercentageFee;
         uint32 baseReserve;
         uint32 maxTxSize;
         uint32 protocolVersion;
 
         p.mBaseFee = maybeParseNumParam(retMap, "basefee", baseFee);
         p.mBaseReserve = maybeParseNumParam(retMap, "basereserve", baseReserve);
+        p.mBasePercentageFee = maybeParseNumParam("basepercentagefee", basePercentageFee);
         p.mMaxTxSize = maybeParseNumParam(retMap, "maxtxsize", maxTxSize);
         p.mProtocolVersion =
             maybeParseNumParam(retMap, "protocolversion", protocolVersion);

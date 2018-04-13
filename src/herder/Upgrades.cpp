@@ -114,6 +114,11 @@ Upgrades::createUpgradesFor(LedgerHeader const& header) const
         result.emplace_back(LEDGER_UPGRADE_BASE_RESERVE);
         result.back().newBaseReserve() = *mParams.mBaseReserve;
     }
+    if (mParams.mBasePercentageFee && (header.basePercentageFee != *mParams.mBasePercentageFee))
+    {
+        result.emplace_back(LEDGER_UPGRADE_BASE_PERCENTAGE_FEE);
+        result.back().newBasePercentageFee() = *mParams.mBasePercentageFee;
+    }
 
     return result;
 }
@@ -233,6 +238,9 @@ Upgrades::removeUpgrades(std::vector<UpgradeType>::const_iterator beginUpdates,
         case LEDGER_UPGRADE_BASE_RESERVE:
             resetParam(res.mBaseReserve, lu.newBaseReserve());
             break;
+        case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+            resetParam(res.mBasePercentageFee, lu.newBasePercentageFee());
+            break;
         default:
             // skip unknown
             break;
@@ -286,6 +294,16 @@ Upgrades::isValid(uint64_t closeTime, UpgradeType const& upgrade,
             res = mParams.mBaseFee && (newFee == *mParams.mBaseFee);
         }
         res = res && (newFee != 0);
+    }
+    break;
+    case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+    {
+        uint32 newPercentageFee = lupgrade.newBasePercentageFee();
+        if (nomination)
+        {
+            res = mParams.mBasePercentageFee && (newPercentageFee == *mParams.mBasePercentageFee);
+        }
+        res = res && (newPercentageFee != 0);
     }
     break;
     case LEDGER_UPGRADE_MAX_TX_SET_SIZE:
