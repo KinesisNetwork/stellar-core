@@ -135,6 +135,9 @@ Upgrades::applyTo(LedgerUpgrade const& upgrade, LedgerHeader& header)
     case LEDGER_UPGRADE_BASE_RESERVE:
         header.baseReserve = upgrade.newBaseReserve();
         break;
+    case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+        header.basePercentageFee = upgrade.newBasePercentageFee();
+        break;
     default:
     {
         auto s = fmt::format("Unknown upgrade type: {0}", upgrade.type());
@@ -156,6 +159,8 @@ Upgrades::toString(LedgerUpgrade const& upgrade)
         return fmt::format("maxtxsetsize={0}", upgrade.newMaxTxSetSize());
     case LEDGER_UPGRADE_BASE_RESERVE:
         return fmt::format("basereserve={0}", upgrade.newBaseReserve());
+    case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
+        return fmt::format("basepercentagefee={0}", upgrade.newBasePercentageFee());
     default:
         return "<unsupported>";
     }
@@ -180,6 +185,7 @@ Upgrades::toString() const
     appendInfo("protocolversion", mParams.mProtocolVersion);
     appendInfo("basefee", mParams.mBaseFee);
     appendInfo("basereserve", mParams.mBaseReserve);
+    appendInfo("basepercentagefee", mParams.mBasePercentageFee);
     appendInfo("maxtxsize", mParams.mMaxTxSize);
 
     return r.str();

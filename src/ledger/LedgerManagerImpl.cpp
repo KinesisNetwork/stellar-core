@@ -212,6 +212,7 @@ LedgerManagerImpl::startNewLedger()
         ledger.ledgerVersion = cfg.LEDGER_PROTOCOL_VERSION;
         ledger.baseFee = cfg.TESTING_UPGRADE_DESIRED_FEE;
         ledger.baseReserve = cfg.TESTING_UPGRADE_RESERVE;
+        ledger.basePercentageFee = cfg.TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE;
         ledger.maxTxSetSize = cfg.TESTING_UPGRADE_MAX_TX_PER_LEDGER;
     }
 
