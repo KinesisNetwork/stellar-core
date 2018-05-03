@@ -708,7 +708,8 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
 
         p.mBaseFee = maybeParseNumParam(retMap, "basefee", baseFee);
         p.mBaseReserve = maybeParseNumParam(retMap, "basereserve", baseReserve);
-        p.mBasePercentageFee = maybeParseNumParam("basepercentagefee", basePercentageFee);
+        p.mBasePercentageFee =
+            maybeParseNumParam(retMap, "basepercentagefee", basePercentageFee);
         p.mMaxTxSize = maybeParseNumParam(retMap, "maxtxsize", maxTxSize);
         p.mProtocolVersion =
             maybeParseNumParam(retMap, "protocolversion", protocolVersion);
