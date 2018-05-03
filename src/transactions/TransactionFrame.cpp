@@ -106,13 +106,13 @@ TransactionFrame::getFeeRatio(LedgerManager const& lm) const
     return ((double)getFee() / (double)getMinFee(lm));
 }
 
-uint64_t
+int64_t
 TransactionFrame::getFee() const
 {
     return mEnvelope.tx.fee;
 }
 
-uint64_t
+int64_t
 TransactionFrame::getMinFee(LedgerManager const& lm) const
 {
     size_t count = mOperations.size();
