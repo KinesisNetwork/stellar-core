@@ -234,6 +234,7 @@ ApplicationImpl::getJsonInfo()
     info["ledger"]["closeTime"] = (Json::UInt64)lcl.header.scpValue.closeTime;
     info["ledger"]["version"] = lcl.header.ledgerVersion;
     info["ledger"]["baseFee"] = lcl.header.baseFee;
+    info["ledger"]["basePercentageFee"] = lcl.header.basePercentageFee;
     info["ledger"]["baseReserve"] = lcl.header.baseReserve;
     info["ledger"]["age"] = (int)lm.secondsSinceLastLedgerClose();
     info["peers"]["pending_count"] = getOverlayManager().getPendingPeersCount();

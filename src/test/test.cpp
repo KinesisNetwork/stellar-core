@@ -154,7 +154,7 @@ test(int argc, char* const* argv, el::Level ll,
     Config const& cfg = getTestConfig();
     Logging::setFmt("<test>");
     Logging::setLoggingToFile(cfg.LOG_FILE_PATH);
-    Logging::setLogLevel(ll, nullptr);
+    Logging::setLogLevel(el::Level::Fatal, nullptr);
     LOG(INFO) << "Testing stellar-core " << STELLAR_CORE_VERSION;
     LOG(INFO) << "Logging to " << cfg.LOG_FILE_PATH;
 

@@ -1,0 +1,23 @@
+FROM ubuntu:14.04
+
+RUN apt-get -yq update 
+RUN apt-get install -yq curl software-properties-common
+RUN curl -sSL "http://apt.llvm.org/llvm-snapshot.gpg.key" | apt-key add - \
+    && echo "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-5.0 main" >> /etc/apt/sources.list \
+    && apt-add-repository -y "ppa:ubuntu-toolchain-r/test"
+
+RUN apt-get -yq update
+RUN apt-get -yq --no-install-suggests --no-install-recommends install \
+    autoconf automake bison build-essential clang-3.5 flex g++-4.9 git libpq-dev libpq5 libstdc++6 libtool pkg-config clang-format-5.0
+RUN mkdir /overwrite-bin \
+    && ln -s $(which gcc-4.9) /overwrite-bin/gcc \
+    && ln -s $(which g++-4.9) /overwrite-bin/g++ \
+    && ln -s $(which clang-3.5) /overwrite-bin/clang \
+    && ln -s $(which clang++-3.5) /overwrite-bin/clang++ \
+    && ln -s $(which llvm-symbolizer-3.5) /overwrite-bin/llvm-symbolizer \
+    && ln -s $(which clang-format-5.0) /overwrite-bin/clang-format
+
+ENV PATH="/overwrite-bin:${PATH}" CXX="g++" CC="gcc"
+
+WORKDIR /usr/src
+CMD ["bash"]

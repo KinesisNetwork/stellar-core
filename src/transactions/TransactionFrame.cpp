@@ -27,6 +27,7 @@
 #include "medida/metrics_registry.h"
 
 #include <algorithm>
+#include <math.h>
 #include <numeric>
 
 namespace stellar
@@ -105,7 +106,7 @@ TransactionFrame::getFeeRatio(LedgerManager const& lm) const
     return ((double)getFee() / (double)getMinFee(lm));
 }
 
-uint32_t
+int64_t
 TransactionFrame::getFee() const
 {
     return mEnvelope.tx.fee;
@@ -121,7 +122,44 @@ TransactionFrame::getMinFee(LedgerManager const& lm) const
         count = 1;
     }
 
-    return lm.getTxFee() * count;
+    auto baseFee = lm.getTxFee() * count;
+
+    int64_t accumulatedFeeFromPercentage = 0;
+    double percentageFeeAsDouble =
+        (double)lm.getTxPercentageFee() / (double)10000;
+
+    for (auto& op : mOperations)
+    {
+        auto operation = op->getOperation();
+
+        int fieldNumber = operation.body.type();
+
+        if (fieldNumber == 0)
+        {
+            auto percentFeeFloat =
+                operation.body.createAccountOp().startingBalance *
+                percentageFeeAsDouble;
+            int64_t roundedPercentFee = (int64_t)percentFeeFloat;
+            accumulatedFeeFromPercentage =
+                accumulatedFeeFromPercentage + roundedPercentFee;
+        }
+
+        if (fieldNumber == 1)
+        {
+            int8_t assetType =
+                operation.body.paymentOp().asset.type(); // 0 is native
+            if (assetType == 0)
+            {
+                auto percentFeeFloat =
+                    operation.body.paymentOp().amount * percentageFeeAsDouble;
+                int64_t roundedPercentFee = (int64_t)percentFeeFloat;
+                accumulatedFeeFromPercentage =
+                    accumulatedFeeFromPercentage + roundedPercentFee;
+            }
+        }
+    }
+
+    return baseFee + accumulatedFeeFromPercentage;
 }
 
 void
