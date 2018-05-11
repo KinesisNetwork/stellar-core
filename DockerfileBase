@@ -1,7 +1,7 @@
 FROM ubuntu:14.04
 
-RUN apt-get -yq update 
-RUN apt-get install -yq curl software-properties-common
+RUN apt-get -yq update
+RUN apt-get install -yq curl software-properties-common pandoc
 RUN curl -sSL "http://apt.llvm.org/llvm-snapshot.gpg.key" | apt-key add - \
     && echo "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-5.0 main" >> /etc/apt/sources.list \
     && apt-add-repository -y "ppa:ubuntu-toolchain-r/test"
