@@ -79,10 +79,10 @@ while [[ -n "$1" ]]; do
     ;;
   fresh)
     newdb
-    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}"
+    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}" || true
     ;;
   newhist)
-    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}"
+    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}" || true
     ;;
   forcescp)
     stellar-core $CONFIG_OPTION --forcescp
