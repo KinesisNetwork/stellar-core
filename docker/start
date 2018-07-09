@@ -31,31 +31,42 @@ else
 fi
 
 function newdb() {
-    rm -rf /data/*
-
-    dropdb stellar || true
-    createdb stellar || true
-
-    if [[ -n "${HORIZON_PASSWORD}" ]]; then
-      dropuser horizon || true
-      createuser horizon || true
-      psql -c "alter user horizon with password '${HORIZON_PASSWORD}'"
-      psql >/dev/null <<-SQL
-         GRANT CONNECT ON DATABASE stellar to horizon;
-         \c stellar
-         REVOKE ALL ON schema public FROM public;
-         GRANT ALL ON schema public TO postgres;
-         GRANT USAGE ON SCHEMA public to horizon;
-
-         GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO horizon;
-         GRANT SELECT ON ALL TABLES IN SCHEMA public TO horizon;
-
-         ALTER DEFAULT PRIVILEGES FOR USER postgres IN SCHEMA public GRANT SELECT ON SEQUENCES TO horizon;
-         ALTER DEFAULT PRIVILEGES FOR USER postgres IN SCHEMA public GRANT SELECT ON TABLES TO horizon;
-SQL
+    # Create the Stellar DB if it doesnt exist, and flag stellar-core to initialise it
+    if [ "$( psql -tAc "SELECT 1 FROM pg_database WHERE datname='stellar'" )" = '1' ]
+    then
+        echo "Stellar DB already exists"
+    else
+        echo "Initialising Stellar DB"
+        dropdb stellar || true
+        createdb stellar || true
+        stellar-core $CONFIG_OPTION --newdb
     fi
 
-    stellar-core $CONFIG_OPTION --newdb
+    # Create the Horizon DB if it doesn't already exist
+    if [ "$( psql -tAc "SELECT 1 FROM pg_database WHERE datname='horizon'" )" = '1' ]
+    then
+        echo "Horizon DB already exists"
+    else
+        echo "Initialising Horizon DB"
+          if [[ -n "${HORIZON_PASSWORD}" ]]; then
+            dropuser horizon || true
+            createuser horizon || true
+            psql -c "alter user horizon with password '${HORIZON_PASSWORD}'"
+            psql >/dev/null <<-SQL
+              GRANT CONNECT ON DATABASE stellar to horizon;
+              \c stellar
+              REVOKE ALL ON schema public FROM public;
+              GRANT ALL ON schema public TO postgres;
+              GRANT USAGE ON SCHEMA public to horizon;
+
+              GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO horizon;
+              GRANT SELECT ON ALL TABLES IN SCHEMA public TO horizon;
+
+              ALTER DEFAULT PRIVILEGES FOR USER postgres IN SCHEMA public GRANT SELECT ON SEQUENCES TO horizon;
+              ALTER DEFAULT PRIVILEGES FOR USER postgres IN SCHEMA public GRANT SELECT ON TABLES TO horizon;
+SQL
+      fi
+    fi
 }
 
 while [[ -n "$1" ]]; do
@@ -68,12 +79,10 @@ while [[ -n "$1" ]]; do
     ;;
   fresh)
     newdb
-    [[ -n "${HISTORY_RESET}" ]] && $(printf "${HISTORY_RESET}" "${SELF}") || true
-    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}"
+    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}" || true
     ;;
   newhist)
-    [[ -n "${HISTORY_RESET}" ]] && $(printf "${HISTORY_RESET}" "${SELF}") || true
-    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}"
+    [[ -n "${HISTORY_PUT}" ]] && stellar-core $CONFIG_OPTION --newhist "${SELF}" || true
     ;;
   forcescp)
     stellar-core $CONFIG_OPTION --forcescp
