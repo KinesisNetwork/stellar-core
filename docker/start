@@ -32,29 +32,32 @@ fi
 
 function newdb() {
     # Create the Stellar DB if it doesnt exist, and flag stellar-core to initialise it
-    if [ "$( psql -tAc "SELECT 1 FROM pg_database WHERE datname='stellar'" )" = '1' ]
+    if [ "$( psql -tAc "SELECT 1 FROM pg_database WHERE datname='${STELLAR_DB}'" )" = '1' ]
     then
-        echo "Stellar DB already exists"
+        echo "${STELLAR_DB} DB already exists"
     else
-        echo "Initialising Stellar DB"
-        dropdb stellar || true
-        createdb stellar || true
+        echo "Initialising ${STELLAR_DB} DB"
+        dropdb $STELLAR_DB || true
+        createdb $STELLAR_DB || true
         stellar-core $CONFIG_OPTION --newdb
     fi
 
     # Create the Horizon DB if it doesn't already exist
-    if [ "$( psql -tAc "SELECT 1 FROM pg_database WHERE datname='horizon'" )" = '1' ]
+    if [ "$( psql -tAc "SELECT 1 FROM pg_database WHERE datname='${HORIZON_DB}'" )" = '1' ]
     then
-        echo "Horizon DB already exists"
+        echo "${HORIZON_DB} DB already exists"
     else
         echo "Initialising Horizon DB"
+        dropdb $HORIZON_DB || true
+        createdb $HORIZON_DB || true
+
           if [[ -n "${HORIZON_PASSWORD}" ]]; then
             dropuser horizon || true
             createuser horizon || true
             psql -c "alter user horizon with password '${HORIZON_PASSWORD}'"
             psql >/dev/null <<-SQL
-              GRANT CONNECT ON DATABASE stellar to horizon;
-              \c stellar
+              GRANT CONNECT ON DATABASE ${STELLAR_DB} to horizon;
+              \c ${STELLAR_DB}
               REVOKE ALL ON schema public FROM public;
               GRANT ALL ON schema public TO postgres;
               GRANT USAGE ON SCHEMA public to horizon;
