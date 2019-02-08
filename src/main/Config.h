@@ -142,6 +142,7 @@ class Config : public std::enable_shared_from_this<Config>
     uint32_t TESTING_UPGRADE_DESIRED_FEE;            // in stroops
     uint32_t TESTING_UPGRADE_RESERVE;                // in stroops
     uint32_t TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE; // in basis points
+    int64_t TESTING_UPGRADE_DESIRED_MAX_FEE;         // in stroops
     uint32_t TESTING_UPGRADE_MAX_TX_PER_LEDGER;
     unsigned short HTTP_PORT; // what port to listen for commands
     bool PUBLIC_HTTP_PORT;    // if you accept commands from not localhost
@@ -208,4 +209,4 @@ class Config : public std::enable_shared_from_this<Config>
     std::string toStrKey(PublicKey const& pk) const;
     bool resolveNodeID(std::string const& s, PublicKey& retKey) const;
 };
-}
+} // namespace stellar

@@ -34,6 +34,8 @@ class Upgrades
             mBaseFee = make_optional<uint32>(cfg.TESTING_UPGRADE_DESIRED_FEE);
             mBasePercentageFee = make_optional<uint32>(
                 cfg.TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE);
+            mMaxFee =
+                make_optional<uint64>(cfg.TESTING_UPGRADE_DESIRED_MAX_FEE);
             mMaxTxSize =
                 make_optional<uint32>(cfg.TESTING_UPGRADE_MAX_TX_PER_LEDGER);
             mBaseReserve = make_optional<uint32>(cfg.TESTING_UPGRADE_RESERVE);
@@ -42,6 +44,7 @@ class Upgrades
         optional<uint32> mProtocolVersion;
         optional<uint32> mBaseFee;
         optional<uint32> mBasePercentageFee;
+        optional<uint64> mMaxFee;
         optional<uint32> mMaxTxSize;
         optional<uint32> mBaseReserve;
 
@@ -89,4 +92,4 @@ class Upgrades
 
     bool timeForUpgrade(uint64_t time) const;
 };
-}
+} // namespace stellar

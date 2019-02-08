@@ -25,7 +25,7 @@ namespace medida
 {
 class Timer;
 class Counter;
-}
+} // namespace medida
 
 namespace stellar
 {
@@ -82,6 +82,7 @@ class LedgerManagerImpl : public LedgerManager
     int64_t getMinBalance(uint32_t ownerCount) const override;
     uint32_t getTxFee() const override;
     uint32_t getTxPercentageFee() const override;
+    uint64_t getMaxTxFee() const override;
     uint32_t getMaxTxSetSize() const override;
     uint64_t getCloseTime() const override;
     uint64_t secondsSinceLastLedgerClose() const override;
@@ -110,4 +111,4 @@ class LedgerManagerImpl : public LedgerManager
                           uint32_t count) override;
     void checkDbState() override;
 };
-}
+} // namespace stellar

@@ -61,6 +61,7 @@ Config::Config() : NODE_SEED(SecretKey::random())
     TESTING_UPGRADE_RESERVE = LedgerManager::GENESIS_LEDGER_BASE_RESERVE;
     TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE =
         LedgerManager::GENESIS_LEDGER_PERCENTAGE_FEE;
+    TESTING_UPGRADE_DESIRED_MAX_FEE = LedgerManager::GENESIS_LEDGER_MAX_FEE;
     TESTING_UPGRADE_MAX_TX_PER_LEDGER = 50;
 
     HTTP_PORT = DEFAULT_PEER_PORT + 1;
@@ -146,7 +147,7 @@ readInt(ConfigItem const& item, T min = std::numeric_limits<T>::min(),
     }
     return static_cast<T>(v);
 }
-}
+} // namespace
 
 void
 Config::loadQset(std::shared_ptr<cpptoml::toml_group> group, SCPQuorumSet& qset,
@@ -786,4 +787,4 @@ Config::expandNodeID(const std::string& s) const
         return {};
     }
 }
-}
+} // namespace stellar

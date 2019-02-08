@@ -702,6 +702,7 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
 
         uint32 baseFee;
         uint32 basePercentageFee;
+        uint64 maxFee;
         uint32 baseReserve;
         uint32 maxTxSize;
         uint32 protocolVersion;
@@ -710,6 +711,7 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
         p.mBaseReserve = maybeParseNumParam(retMap, "basereserve", baseReserve);
         p.mBasePercentageFee =
             maybeParseNumParam(retMap, "basepercentagefee", basePercentageFee);
+        p.mMaxFee = maybeParseNumParam(retMap, "maxfee", maxFee);
         p.mMaxTxSize = maybeParseNumParam(retMap, "maxtxsize", maxTxSize);
         p.mProtocolVersion =
             maybeParseNumParam(retMap, "protocolversion", protocolVersion);
@@ -965,4 +967,4 @@ CommandHandler::maintenance(std::string const& params, std::string& retStr)
         retStr = "No work performed";
     }
 }
-}
+} // namespace stellar
