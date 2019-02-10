@@ -298,6 +298,15 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
         return false;
     }
 
+    if (mEnvelope.tx.fee > lm.getMaxTxFee())
+    {
+        app.getMetrics()
+            .NewMeter({"transaction", "invalid", "fee-over-max"}, "transaction")
+            .Mark();
+        getResult().result.code(txFEE_OVER_MAX);
+        return false;
+    }
+
     if (!loadAccount(app.getLedgerManager().getCurrentLedgerVersion(), delta,
                      app.getDatabase()))
     {
@@ -885,4 +894,4 @@ TransactionFrame::deleteOldEntries(Database& db, uint32_t ledgerSeq,
     DatabaseUtils::deleteOldEntriesHelper(db.getSession(), ledgerSeq, count,
                                           "txfeehistory", "ledgerseq");
 }
-}
+} // namespace stellar

@@ -705,7 +705,8 @@ enum TransactionResultCode
     txNO_ACCOUNT = -8,           // source account not found
     txINSUFFICIENT_FEE = -9,     // fee is too small
     txBAD_AUTH_EXTRA = -10,      // unused signatures attached to transaction
-    txINTERNAL_ERROR = -11       // an unknown error occured
+    txINTERNAL_ERROR = -11,       // an unknown error occured
+    txFEE_OVER_MAX = -12        // fee is more than the max
 };
 
 struct TransactionResult

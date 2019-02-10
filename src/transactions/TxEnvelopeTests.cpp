@@ -964,6 +964,20 @@ TEST_CASE("txenvelope", "[tx][envelope]")
                 });
             }
 
+            SECTION("Fee over max")
+            {
+                for_all_versions(*app, [&] {
+                    txFrame =
+                        root.tx({payment(a1.getPublicKey(), paymentAmount)});
+                    txFrame->getEnvelope().tx.fee = static_cast<uint64_t>(
+                        app->getLedgerManager().getMaxTxFee() + 1);
+
+                    applyCheck(txFrame, *app);
+
+                    REQUIRE(txFrame->getResultCode() == txFEE_OVER_MAX);
+                });
+            }
+
             SECTION("duplicate payment")
             {
                 for_all_versions(*app, [&] {

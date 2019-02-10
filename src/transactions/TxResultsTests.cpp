@@ -143,7 +143,7 @@ static auto paymentValidityNames = std::map<PaymentValidity, std::string>{
     {PaymentValidity::VALID, "valid"},
     {PaymentValidity::MALFORMED, "malformed"},
     {PaymentValidity::UNDERFUNDED, "underfunded"}};
-}
+} // namespace
 
 template <typename T>
 std::vector<std::vector<T>>
