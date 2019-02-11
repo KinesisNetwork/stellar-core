@@ -7,7 +7,6 @@
 #include "main/Application.h"
 #include "util/Logging.h"
 #include "util/Math.h"
-#include "util/make_unique.h"
 #include "work/WorkManager.h"
 #include "work/WorkParent.h"
 
@@ -154,7 +153,7 @@ Work::scheduleRun()
         std::static_pointer_cast<Work>(shared_from_this()));
     CLOG(DEBUG, "Work") << "scheduling run of " << getUniqueName();
     mScheduled = true;
-    mApp.getClock().getIOService().post([weak]() {
+    mApp.postOnMainThreadWithDelay([weak]() {
         auto self = weak.lock();
         if (!self)
         {
@@ -177,7 +176,7 @@ Work::scheduleComplete(CompleteResult result)
         std::static_pointer_cast<Work>(shared_from_this()));
     CLOG(DEBUG, "Work") << "scheduling completion of " << getUniqueName();
     mScheduled = true;
-    mApp.getClock().getIOService().post([weak, result]() {
+    mApp.postOnMainThreadWithDelay([weak, result]() {
         auto self = weak.lock();
         if (!self)
         {
@@ -206,7 +205,7 @@ Work::scheduleRetry()
 
     if (!mRetryTimer)
     {
-        mRetryTimer = make_unique<VirtualTimer>(mApp.getClock());
+        mRetryTimer = std::make_unique<VirtualTimer>(mApp.getClock());
     }
 
     std::weak_ptr<Work> weak(

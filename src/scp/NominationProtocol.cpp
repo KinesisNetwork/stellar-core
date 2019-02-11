@@ -8,19 +8,16 @@
 #include "crypto/Hex.h"
 #include "crypto/SHA.h"
 #include "lib/json/json.h"
-#include "main/Config.h"
 #include "scp/LocalNode.h"
+#include "scp/QuorumSetUtils.h"
 #include "util/GlobalChecks.h"
 #include "util/Logging.h"
-#include "util/make_unique.h"
-#include "util/types.h"
+#include "util/XDROperators.h"
 #include "xdrpp/marshal.h"
 #include <functional>
 
 namespace stellar
 {
-using xdr::operator==;
-using xdr::operator<;
 using namespace std::placeholders;
 
 NominationProtocol::NominationProtocol(Slot& slot)
@@ -169,7 +166,7 @@ NominationProtocol::emitNomination()
             isNewerStatement(mLastEnvelope->statement.pledges.nominate(),
                              st.pledges.nominate()))
         {
-            mLastEnvelope = make_unique<SCPEnvelope>(envelope);
+            mLastEnvelope = std::make_unique<SCPEnvelope>(envelope);
             if (mSlot.isFullyValidated())
             {
                 mSlot.getSCPDriver().emitEnvelope(envelope);
@@ -211,9 +208,15 @@ NominationProtocol::applyAll(SCPNomination const& nom,
 void
 NominationProtocol::updateRoundLeaders()
 {
+    SCPQuorumSet myQSet = mSlot.getLocalNode()->getQuorumSet();
+
+    // initialize priority with value derived from self
     mRoundLeaders.clear();
-    uint64 topPriority = 0;
-    SCPQuorumSet const& myQSet = mSlot.getLocalNode()->getQuorumSet();
+    auto localID = mSlot.getLocalNode()->getNodeID();
+    normalizeQSet(myQSet, &localID);
+
+    mRoundLeaders.insert(localID);
+    uint64 topPriority = getNodePriority(localID, myQSet);
 
     LocalNode::forAllNodes(myQSet, [&](NodeID const& cur) {
         uint64 w = getNodePriority(cur, myQSet);
@@ -257,7 +260,17 @@ NominationProtocol::getNodePriority(NodeID const& nodeID,
                                     SCPQuorumSet const& qset)
 {
     uint64 res;
-    uint64 w = LocalNode::getNodeWeight(nodeID, qset);
+    uint64 w;
+
+    if (nodeID == mSlot.getLocalNode()->getNodeID())
+    {
+        // local node is in all quorum sets
+        w = UINT64_MAX;
+    }
+    else
+    {
+        w = LocalNode::getNodeWeight(nodeID, qset);
+    }
 
     if (hashNode(false, nodeID) < w)
     {
@@ -522,33 +535,35 @@ NominationProtocol::stopNomination()
     mNominationStarted = false;
 }
 
-void
-NominationProtocol::dumpInfo(Json::Value& ret)
+Json::Value
+NominationProtocol::getJsonInfo()
 {
-    Json::Value& nomState = ret["nomination"];
-    nomState["roundnumber"] = mRoundNumber;
-    nomState["started"] = mNominationStarted;
+    Json::Value ret;
+    ret["roundnumber"] = mRoundNumber;
+    ret["started"] = mNominationStarted;
 
     int counter = 0;
     for (auto const& v : mVotes)
     {
-        nomState["X"][counter] = mSlot.getSCP().getValueString(v);
+        ret["X"][counter] = mSlot.getSCP().getValueString(v);
         counter++;
     }
 
     counter = 0;
     for (auto const& v : mAccepted)
     {
-        nomState["Y"][counter] = mSlot.getSCP().getValueString(v);
+        ret["Y"][counter] = mSlot.getSCP().getValueString(v);
         counter++;
     }
 
     counter = 0;
     for (auto const& v : mCandidates)
     {
-        nomState["Z"][counter] = mSlot.getSCP().getValueString(v);
+        ret["Z"][counter] = mSlot.getSCP().getValueString(v);
         counter++;
     }
+
+    return ret;
 }
 
 void
@@ -570,7 +585,7 @@ NominationProtocol::setStateFromEnvelope(SCPEnvelope const& e)
         mVotes.emplace(v);
     }
 
-    mLastEnvelope = make_unique<SCPEnvelope>(e);
+    mLastEnvelope = std::make_unique<SCPEnvelope>(e);
 }
 
 std::vector<SCPEnvelope>

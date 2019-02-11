@@ -12,7 +12,7 @@
 #include "overlay/PeerRecord.h"
 #include "overlay/TCPPeer.h"
 #include "util/Logging.h"
-#include "util/make_unique.h"
+#include "util/XDROperators.h"
 
 #include "medida/counter.h"
 #include "medida/meter.h"
@@ -50,12 +50,10 @@ namespace stellar
 using namespace soci;
 using namespace std;
 
-using xdr::operator<;
-
 std::unique_ptr<OverlayManager>
 OverlayManager::create(Application& app)
 {
-    return make_unique<OverlayManagerImpl>(app);
+    return std::make_unique<OverlayManagerImpl>(app);
 }
 
 OverlayManagerImpl::OverlayManagerImpl(Application& app)
@@ -63,12 +61,10 @@ OverlayManagerImpl::OverlayManagerImpl(Application& app)
     , mDoor(mApp)
     , mAuth(mApp)
     , mShuttingDown(false)
-    , mMessagesReceived(app.getMetrics().NewMeter(
-          {"overlay", "message", "flood-receive"}, "message"))
     , mMessagesBroadcast(app.getMetrics().NewMeter(
           {"overlay", "message", "broadcast"}, "message"))
     , mConnectionsAttempted(app.getMetrics().NewMeter(
-          {"overlay", "connection", "attempt"}, "connection"))
+          {"overlay", "connection", "outbound-start"}, "connection"))
     , mConnectionsEstablished(app.getMetrics().NewMeter(
           {"overlay", "connection", "establish"}, "connection"))
     , mConnectionsDropped(app.getMetrics().NewMeter(
@@ -76,9 +72,9 @@ OverlayManagerImpl::OverlayManagerImpl(Application& app)
     , mConnectionsRejected(app.getMetrics().NewMeter(
           {"overlay", "connection", "reject"}, "connection"))
     , mPendingPeersSize(
-          app.getMetrics().NewCounter({"overlay", "memory", "pending-peers"}))
+          app.getMetrics().NewCounter({"overlay", "connection", "pending"}))
     , mAuthenticatedPeersSize(app.getMetrics().NewCounter(
-          {"overlay", "memory", "authenticated-peers"}))
+          {"overlay", "connection", "authenticated"}))
     , mTimer(app)
     , mFloodGate(app)
 {
@@ -239,17 +235,17 @@ OverlayManagerImpl::getPeersToConnectTo(int maxNum)
 
     std::vector<PeerRecord> peers;
 
-    PeerRecord::loadPeerRecords(mApp.getDatabase(), batchSize,
-                                mApp.getClock().now(),
-                                [&](PeerRecord const& pr) {
-                                    // skip peers that we're already
-                                    // connected/connecting to
-                                    if (!getConnectedPeer(pr.getAddress()))
-                                    {
-                                        peers.emplace_back(pr);
-                                    }
-                                    return peers.size() < maxNum;
-                                });
+    PeerRecord::loadPeerRecords(
+        mApp.getDatabase(), batchSize, mApp.getClock().now(),
+        [&](PeerRecord const& pr) {
+            // skip peers that we're already
+            // connected/connecting to
+            if (!getConnectedPeer(pr.getAddress()))
+            {
+                peers.emplace_back(pr);
+            }
+            return peers.size() < static_cast<size_t>(maxNum);
+        });
     return peers;
 }
 
@@ -371,7 +367,7 @@ OverlayManagerImpl::addPendingPeer(Peer::pointer peer)
 void
 OverlayManagerImpl::dropPeer(Peer* peer)
 {
-    mConnectionsDropped.Mark();
+    bool dropped = false;
     CLOG(INFO, "Overlay") << "Dropping peer "
                           << mApp.getConfig().toShortString(peer->getPeerID())
                           << "@" << peer->toString();
@@ -381,6 +377,7 @@ OverlayManagerImpl::dropPeer(Peer* peer)
     if (pendingIt != std::end(mPendingPeers))
     {
         mPendingPeers.erase(pendingIt);
+        dropped = true;
     }
     else
     {
@@ -388,11 +385,16 @@ OverlayManagerImpl::dropPeer(Peer* peer)
         if (authentiatedIt != std::end(mAuthenticatedPeers))
         {
             mAuthenticatedPeers.erase(authentiatedIt);
+            dropped = true;
         }
         else
         {
             CLOG(WARNING, "Overlay") << "Dropping unlisted peer";
         }
+    }
+    if (dropped)
+    {
+        mConnectionsDropped.Mark();
     }
     updateSizeCounters();
 }
@@ -530,7 +532,6 @@ void
 OverlayManagerImpl::recvFloodedMsg(StellarMessage const& msg,
                                    Peer::pointer peer)
 {
-    mMessagesReceived.Mark();
     mFloodGate.addRecord(msg, peer);
 }
 

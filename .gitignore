@@ -23,7 +23,7 @@
 # text editors
 *~
 *.swp
-.vscode
+**/.vscode/*
 
 .libs
 .deps

@@ -76,12 +76,12 @@ class SCP
     // returns the local node descriptor
     std::shared_ptr<LocalNode> getLocalNode();
 
-    void dumpInfo(Json::Value& ret, size_t limit);
+    Json::Value getJsonInfo(size_t limit);
 
     // summary: only return object counts
     // index = 0 for returning information for all slots
-    void dumpQuorumInfo(Json::Value& ret, NodeID const& id, bool summary,
-                        uint64 index = 0);
+    Json::Value getJsonQuorumInfo(NodeID const& id, bool summary,
+                                  uint64 index = 0);
 
     // Purges all data relative to all the slots whose slotIndex is smaller
     // than the specified `maxSlotIndex`.
@@ -89,6 +89,9 @@ class SCP
 
     // Returns whether the local node is a validator.
     bool isValidator();
+
+    // returns the validation state of the given slot
+    bool isSlotFullyValidated(uint64 slotIndex);
 
     // Helpers for monitoring and reporting the internal memory-usage of the SCP
     // protocol to system metric reporters.

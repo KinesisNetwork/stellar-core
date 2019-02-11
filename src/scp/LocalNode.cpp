@@ -10,16 +10,14 @@
 #include "lib/json/json.h"
 #include "scp/QuorumSetUtils.h"
 #include "util/Logging.h"
-#include "util/types.h"
+#include "util/XDROperators.h"
+#include "util/numeric.h"
 #include "xdrpp/marshal.h"
 #include <algorithm>
 #include <unordered_set>
 
 namespace stellar
 {
-using xdr::operator==;
-using xdr::operator<;
-
 LocalNode::LocalNode(NodeID const& nodeID, bool isValidator,
                      SCPQuorumSet const& qSet, SCP* scp)
     : mNodeID(nodeID), mIsValidator(isValidator), mQSet(qSet), mSCP(scp)
@@ -110,7 +108,7 @@ LocalNode::getNodeWeight(NodeID const& nodeID, SCPQuorumSet const& qset)
     {
         if (qsetNode == nodeID)
         {
-            bigDivide(res, UINT64_MAX, n, d, ROUND_DOWN);
+            bigDivide(res, UINT64_MAX, n, d, ROUND_UP);
             return res;
         }
     }
@@ -120,7 +118,7 @@ LocalNode::getNodeWeight(NodeID const& nodeID, SCPQuorumSet const& qset)
         uint64 leafW = getNodeWeight(nodeID, q);
         if (leafW)
         {
-            bigDivide(res, leafW, n, d, ROUND_DOWN);
+            bigDivide(res, leafW, n, d, ROUND_UP);
             return res;
         }
     }
@@ -377,30 +375,28 @@ LocalNode::findClosestVBlocking(SCPQuorumSet const& qset,
     return res;
 }
 
-void
-LocalNode::toJson(SCPQuorumSet const& qSet, Json::Value& value) const
+Json::Value
+LocalNode::toJson(SCPQuorumSet const& qSet) const
 {
-    value["t"] = qSet.threshold;
-    auto& entries = value["v"];
+    Json::Value ret;
+    ret["t"] = qSet.threshold;
+    auto& entries = ret["v"];
     for (auto const& v : qSet.validators)
     {
         entries.append(mSCP->getDriver().toShortString(v));
     }
     for (auto const& s : qSet.innerSets)
     {
-        Json::Value iV;
-        toJson(s, iV);
-        entries.append(iV);
+        entries.append(toJson(s));
     }
+    return ret;
 }
 
 std::string
 LocalNode::to_string(SCPQuorumSet const& qSet) const
 {
-    Json::Value v;
-    toJson(qSet, v);
     Json::FastWriter fw;
-    return fw.write(v);
+    return fw.write(toJson(qSet));
 }
 
 NodeID const&

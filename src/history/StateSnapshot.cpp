@@ -12,17 +12,12 @@
 #include "history/FileTransferInfo.h"
 #include "history/HistoryArchive.h"
 #include "history/HistoryManager.h"
-#include "ledger/LedgerHeaderFrame.h"
+#include "ledger/LedgerHeaderUtils.h"
 #include "main/Application.h"
 #include "main/Config.h"
 #include "transactions/TransactionFrame.h"
 #include "util/Logging.h"
-#include "util/SociNoWarnings.h"
 #include "util/XDRStream.h"
-#include "util/make_unique.h"
-
-#include "medida/counter.h"
-#include "medida/metrics_registry.h"
 
 namespace stellar
 {
@@ -50,7 +45,8 @@ StateSnapshot::StateSnapshot(Application& app, HistoryArchiveState const& state)
 void
 StateSnapshot::makeLive()
 {
-    for (auto i = 0; i < mLocalState.currentBuckets.size(); i++)
+    for (uint32_t i = 0;
+         i < static_cast<uint32>(mLocalState.currentBuckets.size()); i++)
     {
         auto& hb = mLocalState.currentBuckets[i];
         if (hb.next.hasHashes() && !hb.next.isLive())
@@ -65,7 +61,7 @@ StateSnapshot::writeHistoryBlocks() const
 {
     std::unique_ptr<soci::session> snapSess(
         mApp.getDatabase().canUsePool()
-            ? make_unique<soci::session>(mApp.getDatabase().getPool())
+            ? std::make_unique<soci::session>(mApp.getDatabase().getPool())
             : nullptr);
     soci::session& sess(snapSess ? *snapSess : mApp.getDatabase().getSession());
     soci::transaction tx(sess);
@@ -97,8 +93,8 @@ StateSnapshot::writeHistoryBlocks() const
         CLOG(DEBUG, "History") << "Streaming " << count
                                << " ledgers worth of history, from " << begin;
 
-        nHeaders = LedgerHeaderFrame::copyLedgerHeadersToStream(
-            mApp.getDatabase(), sess, begin, count, ledgerOut);
+        nHeaders = LedgerHeaderUtils::copyToStream(mApp.getDatabase(), sess,
+                                                   begin, count, ledgerOut);
         size_t nTxs = TransactionFrame::copyTransactionsToStream(
             mApp.getNetworkID(), mApp.getDatabase(), sess, begin, count, txOut,
             txResultOut);

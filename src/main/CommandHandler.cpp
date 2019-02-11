@@ -7,6 +7,8 @@
 #include "crypto/KeyUtils.h"
 #include "herder/Herder.h"
 #include "ledger/LedgerManager.h"
+#include "ledger/LedgerState.h"
+#include "ledger/LedgerStateEntry.h"
 #include "lib/http/server.hpp"
 #include "lib/json/json.h"
 #include "lib/util/format.h"
@@ -15,12 +17,13 @@
 #include "main/Maintainer.h"
 #include "overlay/BanManager.h"
 #include "overlay/OverlayManager.h"
+#include "transactions/TransactionUtils.h"
 #include "util/Logging.h"
 #include "util/StatusManager.h"
-#include "util/make_unique.h"
 
 #include "medida/reporting/json_reporter.h"
-#include "util/basen.h"
+#include "util/Decoder.h"
+#include "util/XDROperators.h"
 #include "xdrpp/marshal.h"
 #include "xdrpp/printer.h"
 
@@ -37,8 +40,6 @@ using std::placeholders::_2;
 
 namespace stellar
 {
-using xdr::operator<;
-
 CommandHandler::CommandHandler(Application& app) : mApp(app)
 {
     if (mApp.getConfig().HTTP_PORT)
@@ -57,13 +58,13 @@ CommandHandler::CommandHandler(Application& app) : mApp(app)
 
         int httpMaxClient = mApp.getConfig().HTTP_MAX_CLIENT;
 
-        mServer = stellar::make_unique<http::server::server>(
+        mServer = std::make_unique<http::server::server>(
             app.getClock().getIOService(), ipStr, mApp.getConfig().HTTP_PORT,
             httpMaxClient);
     }
     else
     {
-        mServer = stellar::make_unique<http::server::server>(
+        mServer = std::make_unique<http::server::server>(
             app.getClock().getIOService());
     }
 
@@ -71,7 +72,6 @@ CommandHandler::CommandHandler(Application& app) : mApp(app)
 
     addRoute("bans", &CommandHandler::bans);
     addRoute("catchup", &CommandHandler::catchup);
-    addRoute("checkdb", &CommandHandler::checkdb);
     addRoute("connect", &CommandHandler::connect);
     addRoute("dropcursor", &CommandHandler::dropcursor);
     addRoute("droppeer", &CommandHandler::dropPeer);
@@ -83,6 +83,7 @@ CommandHandler::CommandHandler(Application& app) : mApp(app)
     addRoute("maintenance", &CommandHandler::maintenance);
     addRoute("manualclose", &CommandHandler::manualClose);
     addRoute("metrics", &CommandHandler::metrics);
+    addRoute("clearmetrics", &CommandHandler::clearMetrics);
     addRoute("peers", &CommandHandler::peers);
     addRoute("quorum", &CommandHandler::quorum);
     addRoute("setcursor", &CommandHandler::setcursor);
@@ -154,13 +155,16 @@ CommandHandler::testAcc(std::string const& params, std::string& retStr)
         {
             key = getAccount(accName->second.c_str());
         }
-        auto acc = loadAccount(key.getPublicKey(), mApp, false);
+
+        LedgerState ls(mApp.getLedgerStateRoot());
+        auto acc = stellar::loadAccount(ls, key.getPublicKey());
         if (acc)
         {
+            auto const& ae = acc.current().data.account();
             root["name"] = accName->second;
-            root["id"] = KeyUtils::toStrKey(acc->getID());
-            root["balance"] = (Json::Int64)acc->getBalance();
-            root["seqnum"] = (Json::UInt64)acc->getSeqNum();
+            root["id"] = KeyUtils::toStrKey(ae.accountID);
+            root["balance"] = (Json::Int64)ae.balance;
+            root["seqnum"] = (Json::UInt64)ae.seqNum;
         }
     }
     retStr = root.toStyledString();
@@ -250,17 +254,22 @@ CommandHandler::fileNotFound(std::string const& params, std::string& retStr)
         "</p><p><h1> /catchup?ledger=NNN[&mode=MODE]</h1>"
         "triggers the instance to catch up to ledger NNN from history; "
         "mode is either 'minimal' (the default, if omitted) or 'complete'."
-        "</p><p><h1> /checkdb</h1>"
-        "triggers the instance to perform an integrity check of the database."
         "</p><p><h1> /connect?peer=NAME&port=NNN</h1>"
         "triggers the instance to connect to peer NAME at port NNN."
         "</p><p><h1> "
         "/droppeer?node=NODE_ID[&ban=D]</h1>"
         "drops peer identified by PEER_ID, when D is 1 the peer is also banned"
         "</p><p><h1> "
-        "/generateload[?accounts=N&txs=M&txrate=(R|auto)]</h1>"
+        "/generateload[?mode=(create|pay)&accounts=N&offset=K&txs=M&txrate=(R|"
+        "auto)&"
+        "batchsize=L]</h1>"
         "artificially generate load for testing; must be used with "
-        "ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING set to true"
+        "ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING set to true. "
+        "Depending on the mode, either creates new accounts or generates "
+        "payments on accounts specified"
+        " (where number of accounts can be offset)."
+        " Additionally, allows batching up to 100 account creations per "
+        "transaction via 'batchsize'."
         "</p><p><h1> /help</h1>"
         "give a list of currently supported commands"
         "</p><p><h1> /info</h1>"
@@ -277,6 +286,9 @@ CommandHandler::fileNotFound(std::string const& params, std::string& retStr)
         "</p><p><h1> /metrics</h1>"
         "returns a snapshot of the metrics registry (for monitoring and "
         "debugging purpose)"
+        "</p><p><h1> /clearmetrics?[domain=DOMAIN]</h1>"
+        "clear metrics for a specified domain. If no domain specified, "
+        "clear all metrics (for testing purposes)"
         "</p><p><h1> /peers</h1>"
         "returns the list of known peers in JSON format"
         "</p><p><h1> /quorum?[node=NODE_ID][&compact=true]</h1>"
@@ -310,8 +322,9 @@ CommandHandler::fileNotFound(std::string const& params, std::string& retStr)
         "transactions are ordered by transaction fee(lower fee transactions"
         " are held for later).<br>"
         "protocolversion (uint32) defines the protocol version to upgrade to."
-        " When specified it must match the protocol version supported by the"
-        " node<br>"
+        " When specified it must match one of the protocol versions supported"
+        " by the node and should be greater than ledgerVersion from the current"
+        " ledger <br>"
         "</p><p><h1> /dropcursor?id=XYZ</h1> deletes the tracking cursor with "
         "identified by `id`. See `setcursor` for more information"
         "</p><p><h1> /setcursor?id=ID&cursor=N</h1> sets or creates a cursor "
@@ -359,8 +372,8 @@ CommandHandler::manualClose(std::string const& params, std::string& retStr)
 
 template <typename T>
 optional<T>
-maybeParseNumParam(std::map<std::string, std::string> const& map,
-                   std::string const& key, T& defaultVal)
+maybeParseParam(std::map<std::string, std::string> const& map,
+                std::string const& key, T& defaultVal)
 {
     auto i = map.find(key);
     if (i != map.end())
@@ -383,11 +396,11 @@ maybeParseNumParam(std::map<std::string, std::string> const& map,
 
 template <typename T>
 T
-parseNumParam(std::map<std::string, std::string> const& map,
-              std::string const& key)
+parseParam(std::map<std::string, std::string> const& map,
+           std::string const& key)
 {
     T val;
-    auto res = maybeParseNumParam(map, key, val);
+    auto res = maybeParseParam(map, key, val);
     if (!res)
     {
         std::string errorMsg = fmt::format("'{}' argument is required!", key);
@@ -401,20 +414,36 @@ CommandHandler::generateLoad(std::string const& params, std::string& retStr)
 {
     if (mApp.getConfig().ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING)
     {
-        // Defaults are 200k accounts, 200k txs, 10 tx/s. This load-test will
-        // therefore take 40k secs or about 12 hours.
-
-        uint32_t nAccounts = 200000;
-        uint32_t nTxs = 200000;
+        uint32_t nAccounts = 1000;
+        uint32_t nTxs = 0;
         uint32_t txRate = 10;
+        uint32_t batchSize = 100; // Only for account creations
+        uint32_t offset = 0;
         bool autoRate = false;
+        std::string mode = "create";
 
         std::map<std::string, std::string> map;
         http::server::server::parseParams(params, map);
 
-        maybeParseNumParam(map, "accounts", nAccounts);
-        maybeParseNumParam(map, "txs", nTxs);
+        bool isCreate;
+        maybeParseParam<std::string>(map, "mode", mode);
+        if (mode == std::string("create"))
+        {
+            isCreate = true;
+        }
+        else if (mode == std::string("pay"))
+        {
+            isCreate = false;
+        }
+        else
+        {
+            throw std::runtime_error("Unknown mode.");
+        }
 
+        maybeParseParam(map, "accounts", nAccounts);
+        maybeParseParam(map, "txs", nTxs);
+        maybeParseParam(map, "batchsize", batchSize);
+        maybeParseParam(map, "offset", offset);
         {
             auto i = map.find("txrate");
             if (i != map.end() && i->second == std::string("auto"))
@@ -423,15 +452,24 @@ CommandHandler::generateLoad(std::string const& params, std::string& retStr)
             }
             else
             {
-                maybeParseNumParam(map, "txrate", txRate);
+                maybeParseParam(map, "txrate", txRate);
             }
         }
 
-        double hours = ((nAccounts + nTxs) / txRate) / 3600.0;
-        mApp.generateLoad(nAccounts, nTxs, txRate, autoRate);
-        retStr = fmt::format(
-            "Generating load: {:d} accounts, {:d} txs, {:d} tx/s = {:f} hours",
-            nAccounts, nTxs, txRate, hours);
+        uint32_t numItems = isCreate ? nAccounts : nTxs;
+        std::string itemType = isCreate ? "accounts" : "txs";
+        double hours = (numItems / txRate) / 3600.0;
+
+        if (batchSize > 100)
+        {
+            batchSize = 100;
+            retStr = "Setting batch size to its limit of 100.";
+        }
+        mApp.generateLoad(isCreate, nAccounts, offset, nTxs, txRate, batchSize,
+                          autoRate);
+        retStr +=
+            fmt::format(" Generating load: {:d} {:s}, {:d} tx/s = {:f} hours",
+                        numItems, itemType, txRate, hours);
     }
     else
     {
@@ -449,7 +487,7 @@ CommandHandler::peers(std::string const&, std::string& retStr)
     int counter = 0;
     for (auto peer : mApp.getOverlayManager().getPendingPeers())
     {
-        root["pending_peers"][counter]["address"] = peer->toString();
+        root["pending_peers"][counter] = peer->toString();
 
         counter++;
     }
@@ -514,7 +552,7 @@ CommandHandler::catchup(std::string const& params, std::string& retStr)
     std::map<std::string, std::string> retMap;
     http::server::server::parseParams(params, retMap);
 
-    uint32_t ledger = parseNumParam<uint32_t>(retMap, "ledger");
+    uint32_t ledger = parseParam<uint32_t>(retMap, "ledger");
 
     auto modeP = retMap.find("mode");
     if (modeP != retMap.end())
@@ -538,20 +576,13 @@ CommandHandler::catchup(std::string const& params, std::string& retStr)
         }
     }
 
-    mApp.getLedgerManager().startCatchUp({ledger, count}, true);
+    mApp.getLedgerManager().startCatchup({ledger, count}, true);
     retStr = (std::string("Started catchup to ledger ") +
               std::to_string(ledger) + std::string(" in mode ") +
               std::string(
                   count == std::numeric_limits<uint32_t>::max()
                       ? "CATCHUP_COMPLETE"
                       : (count != 0 ? "CATCHUP_RECENT" : "CATCHUP_MINIMAL")));
-}
-
-void
-CommandHandler::checkdb(std::string const& params, std::string& retStr)
-{
-    mApp.checkDB();
-    retStr = "CheckDB started.";
 }
 
 void
@@ -714,7 +745,7 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
         p.mMaxFee = maybeParseNumParam(retMap, "maxfee", maxFee);
         p.mMaxTxSize = maybeParseNumParam(retMap, "maxtxsize", maxTxSize);
         p.mProtocolVersion =
-            maybeParseNumParam(retMap, "protocolversion", protocolVersion);
+            maybeParseParam(retMap, "protocolversion", protocolVersion);
 
         mApp.getHerder().setUpgrades(p);
     }
@@ -732,7 +763,6 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
 void
 CommandHandler::quorum(std::string const& params, std::string& retStr)
 {
-    Json::Value root;
     std::map<std::string, std::string> retMap;
     http::server::server::parseParams(params, retMap);
 
@@ -752,24 +782,21 @@ CommandHandler::quorum(std::string const& params, std::string& retStr)
         }
     }
 
-    mApp.getHerder().dumpQuorumInfo(root, n, retMap["compact"] == "true");
-
+    auto root =
+        mApp.getHerder().getJsonQuorumInfo(n, retMap["compact"] == "true");
     retStr = root.toStyledString();
 }
 
 void
 CommandHandler::scpInfo(std::string const& params, std::string& retStr)
 {
-    Json::Value root;
-
     std::map<std::string, std::string> retMap;
     http::server::server::parseParams(params, retMap);
 
     size_t lim = 2;
-    maybeParseNumParam(retMap, "limit", lim);
+    maybeParseParam(retMap, "limit", lim);
 
-    mApp.getHerder().dumpInfo(root, lim);
-
+    auto root = mApp.getHerder().getJsonInfo(lim);
     retStr = root.toStyledString();
 }
 
@@ -822,9 +849,6 @@ CommandHandler::ll(std::string const& params, std::string& retStr)
     retStr = root.toStyledString();
 }
 
-static const char* TX_STATUS_STRING[Herder::TX_STATUS_COUNT] = {
-    "PENDING", "DUPLICATE", "ERROR"};
-
 void
 CommandHandler::tx(std::string const& params, std::string& retStr)
 {
@@ -836,7 +860,7 @@ CommandHandler::tx(std::string const& params, std::string& retStr)
         TransactionEnvelope envelope;
         std::string blob = params.substr(prefix.size());
         std::vector<uint8_t> binBlob;
-        bn::decode_b64(blob, binBlob);
+        decoder::decode_b64(blob, binBlob);
 
         xdr::xdr_from_opaque(binBlob, envelope);
         TransactionFramePtr transaction =
@@ -859,13 +883,14 @@ CommandHandler::tx(std::string const& params, std::string& retStr)
 
             output << "{"
                    << "\"status\": "
-                   << "\"" << TX_STATUS_STRING[status] << "\"";
+                   << "\"" << Herder::TX_STATUS_STRING[status] << "\"";
             if (status == Herder::TX_STATUS_ERROR)
             {
                 std::string resultBase64;
                 auto resultBin = xdr::xdr_to_opaque(transaction->getResult());
-                resultBase64.reserve(bn::encoded_size64(resultBin.size()) + 1);
-                resultBase64 = bn::encode_b64(resultBin);
+                resultBase64.reserve(decoder::encoded_size64(resultBin.size()) +
+                                     1);
+                resultBase64 = decoder::encode_b64(resultBin);
 
                 output << " , \"error\": \"" << resultBase64 << "\"";
             }
@@ -907,7 +932,7 @@ CommandHandler::setcursor(std::string const& params, std::string& retStr)
     http::server::server::parseParams(params, map);
     std::string const& id = map["id"];
 
-    uint32 cursor = parseNumParam<uint32>(map, "cursor");
+    uint32 cursor = parseParam<uint32>(map, "cursor");
 
     if (!ExternalQueue::validateResourceID(id))
     {
@@ -957,7 +982,7 @@ CommandHandler::maintenance(std::string const& params, std::string& retStr)
     if (map["queue"] == "true")
     {
         uint32_t count = 50000;
-        maybeParseNumParam(map, "count", count);
+        maybeParseParam(map, "count", count);
 
         mApp.getMaintainer().performMaintenance(count);
         retStr = "Done";
@@ -967,4 +992,18 @@ CommandHandler::maintenance(std::string const& params, std::string& retStr)
         retStr = "No work performed";
     }
 }
-} // namespace stellar
+
+void
+CommandHandler::clearMetrics(std::string const& params, std::string& retStr)
+{
+    std::map<std::string, std::string> map;
+    http::server::server::parseParams(params, map);
+
+    std::string domain;
+    maybeParseParam(map, "domain", domain);
+
+    mApp.clearMetrics(domain);
+
+    retStr = fmt::format("Cleared {} metrics!", domain);
+}
+}

@@ -141,6 +141,15 @@
     <ClCompile Include="..\..\src\main\Application.cpp">
       <Filter>main</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\main\ApplicationUtils.cpp">
+      <Filter>main</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\main\CommandLine.cpp">
+      <Filter>main</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\main\DeprecatedCommandLine.cpp">
+      <Filter>main</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\main\main.cpp">
       <Filter>main</Filter>
     </ClCompile>
@@ -201,6 +210,9 @@
     <ClCompile Include="..\..\src\util\types.cpp">
       <Filter>util</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\util\MetricResetter.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\util\Logging.cpp">
       <Filter>util</Filter>
     </ClCompile>
@@ -209,9 +221,6 @@
     </ClCompile>
     <ClCompile Include="..\..\lib\json\jsoncpp.cpp">
       <Filter>lib\json</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\LedgerDelta.cpp">
-      <Filter>ledger</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\database\Database.cpp">
       <Filter>database</Filter>
@@ -242,18 +251,6 @@
     </ClCompile>
     <ClCompile Include="..\..\lib\xdrpp\tests\srpc.cc">
       <Filter>lib\xdrpp</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\AccountFrame.cpp">
-      <Filter>ledger</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\OfferFrame.cpp">
-      <Filter>ledger</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\TrustFrame.cpp">
-      <Filter>ledger</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\EntryFrame.cpp">
-      <Filter>ledger</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\transactions\TransactionFrame.cpp">
       <Filter>transactions</Filter>
@@ -306,7 +303,7 @@
     <ClCompile Include="..\..\src\transactions\TxEnvelopeTests.cpp">
       <Filter>transactions\tests</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\lib\asio\src\asio.cpp">
+    <ClCompile Include="..\..\lib\asio.cpp">
       <Filter>lib</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\bucket\BucketManagerImpl.cpp">
@@ -317,9 +314,6 @@
     </ClCompile>
     <ClCompile Include="..\..\src\util\Uint128Tests.cpp">
       <Filter>util</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\LedgerHeaderFrame.cpp">
-      <Filter>ledger</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\ledger\LedgerHeaderTests.cpp">
       <Filter>ledger\tests</Filter>
@@ -396,9 +390,6 @@
     <ClCompile Include="..\..\src\util\Fs.cpp">
       <Filter>util</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\ledger\LedgerPerformanceTests.cpp">
-      <Filter>ledger\tests</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\util\GlobalChecks.cpp">
       <Filter>util</Filter>
     </ClCompile>
@@ -462,9 +453,6 @@
     <ClCompile Include="..\..\src\main\ExternalQueue.cpp">
       <Filter>main</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\ledger\LedgerEntryTests.cpp">
-      <Filter>ledger\tests</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\ledger\LedgerTestUtils.cpp">
       <Filter>ledger\tests</Filter>
     </ClCompile>
@@ -501,14 +489,8 @@
     <ClCompile Include="..\..\src\transactions\ManageDataOpFrame.cpp">
       <Filter>transactions</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\ledger\DataFrame.cpp">
-      <Filter>ledger</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\transactions\ManageDataTests.cpp">
       <Filter>transactions\tests</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\ledger\LedgerDeltaTests.cpp">
-      <Filter>ledger\tests</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\work\Work.cpp">
       <Filter>work</Filter>
@@ -738,10 +720,16 @@
     <ClCompile Include="..\..\src\history\HistoryArchive.cpp">
       <Filter>history</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\history\HistoryArchiveManager.cpp">
+      <Filter>history</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\history\HistoryManagerImpl.cpp">
       <Filter>history</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\history\InferredQuorum.cpp">
+      <Filter>history</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\history\InferredQuorumUtils.cpp">
       <Filter>history</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\history\StateSnapshot.cpp">
@@ -798,9 +786,6 @@
     <ClCompile Include="..\..\src\invariant\BucketListIsConsistentWithDatabase.cpp">
       <Filter>invariant</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\invariant\CacheIsConsistentWithDatabase.cpp">
-      <Filter>invariant</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\invariant\ConservationOfLumens.cpp">
       <Filter>invariant</Filter>
     </ClCompile>
@@ -819,22 +804,13 @@
     <ClCompile Include="..\..\src\invariant\LedgerEntryIsValid.cpp">
       <Filter>invariant</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\invariant\MinimumAccountBalance.cpp">
-      <Filter>invariant</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\invariant\AccountSubEntriesCountIsValidTests.cpp">
       <Filter>invariant\tests</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\invariant\BucketListIsConsistentWithDatabaseTests.cpp">
       <Filter>invariant\tests</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\invariant\CacheIsConsistentWithDatabaseTests.cpp">
-      <Filter>invariant\tests</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\invariant\ConservationOfLumensTests.cpp">
-      <Filter>invariant\tests</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\src\invariant\MinimumAccountBalanceTests.cpp">
       <Filter>invariant\tests</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\database\DatabaseConnectionStringTest.cpp">
@@ -855,6 +831,63 @@
     <ClCompile Include="..\..\src\overlay\PeerBareAddress.cpp">
       <Filter>overlay</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\transactions\BumpSequenceTests.cpp">
+      <Filter>transactions\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\transactions\BumpSequenceOpFrame.cpp">
+      <Filter>transactions</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\overlay\PeerSharedKeyId.cpp">
+      <Filter>overlay</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\overlay\LoadManagerTests.cpp">
+      <Filter>overlay\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\invariant\LiabilitiesMatchOffersTests.cpp">
+      <Filter>invariant\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\invariant\LiabilitiesMatchOffers.cpp">
+      <Filter>invariant</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LiabilitiesTests.cpp">
+      <Filter>ledger\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\util\numeric.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerHeaderUtils.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerState.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateAccountSQL.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateDataSQL.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateEntry.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateHeader.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateOfferSQL.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateTrustLineSQL.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\TrustLineWrapper.cpp">
+      <Filter>ledger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ledger\LedgerStateTests.cpp">
+      <Filter>ledger\tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\transactions\TransactionUtils.cpp">
+      <Filter>transactions</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\ledger\LedgerManager.h">
@@ -864,6 +897,15 @@
       <Filter>ledger</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\main\Application.h">
+      <Filter>main</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\main\ApplicationUtils.h">
+      <Filter>main</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\main\CommandLine.h">
+      <Filter>main</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\main\DeprecatedCommandLine.h">
       <Filter>main</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\overlay\Floodgate.h">
@@ -941,23 +983,8 @@
     <ClInclude Include="..\..\src\util\Timer.h">
       <Filter>util</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\ledger\LedgerDelta.h">
-      <Filter>ledger</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\src\database\Database.h">
       <Filter>database</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\ledger\AccountFrame.h">
-      <Filter>ledger</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\ledger\OfferFrame.h">
-      <Filter>ledger</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\ledger\TrustFrame.h">
-      <Filter>ledger</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\ledger\EntryFrame.h">
-      <Filter>ledger</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\util\types.h">
       <Filter>util</Filter>
@@ -1004,14 +1031,14 @@
     <ClInclude Include="..\..\src\util\Logging.h">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\util\MetricResetter.h">
+      <Filter>util</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\util\make_unique.h">
       <Filter>util</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\util\must_use.h">
       <Filter>util</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\ledger\LedgerHeaderFrame.h">
-      <Filter>ledger</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\util\TmpDir.h">
       <Filter>util</Filter>
@@ -1198,9 +1225,6 @@
     </ClInclude>
     <ClInclude Include="..\..\src\transactions\ManageDataOpFrame.h">
       <Filter>transactions</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\src\ledger\DataFrame.h">
-      <Filter>ledger</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\work\Work.h">
       <Filter>work</Filter>
@@ -1397,6 +1421,9 @@
     <ClInclude Include="..\..\src\history\HistoryArchive.h">
       <Filter>history</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\history\HistoryArchiveManager.h">
+      <Filter>history</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\history\HistoryManager.h">
       <Filter>history</Filter>
     </ClInclude>
@@ -1407,6 +1434,9 @@
       <Filter>history</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\history\InferredQuorum.h">
+      <Filter>history</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\history\InferredQuorumUtils.h">
       <Filter>history</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\history\StateSnapshot.h">
@@ -1433,9 +1463,6 @@
     <ClInclude Include="..\..\src\invariant\BucketListIsConsistentWithDatabase.h">
       <Filter>invariant</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\invariant\CacheIsConsistentWithDatabase.h">
-      <Filter>invariant</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\src\invariant\ConservationOfLumens.h">
       <Filter>invariant</Filter>
     </ClInclude>
@@ -1457,20 +1484,53 @@
     <ClInclude Include="..\..\src\invariant\LedgerEntryIsValid.h">
       <Filter>invariant</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\invariant\MinimumAccountBalance.h">
-      <Filter>invariant</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\src\main\Maintainer.h">
       <Filter>main</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\database\DatabaseUtils.h">
       <Filter>database</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\transactions\BumpSequenceOpFrame.h">
+      <Filter>transactions</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\main\StellarCoreVersion.h">
       <Filter>main</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\overlay\PeerBareAddress.h">
       <Filter>overlay</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\overlay\PeerSharedKeyId.h">
+      <Filter>overlay</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\invariant\LiabilitiesMatchOffers.h">
+      <Filter>invariant</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\util\LogSlowExecution.h">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\util\numeric.h">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\ledger\LedgerHeaderUtils.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\ledger\LedgerState.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\ledger\LedgerStateEntry.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\ledger\LedgerStateHeader.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\ledger\TrustLineWrapper.h">
+      <Filter>ledger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\transactions\TransactionUtils.h">
+      <Filter>transactions</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\ledger\LedgerStateImpl.h">
+      <Filter>ledger</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -1561,7 +1621,8 @@
     <None Include="..\..\CONTRIBUTING.md" />
     <None Include="..\..\README" />
     <None Include="..\..\travis-build.sh" />
-    <None Include="..\..\ISSUE_TEMPLATE.md" />
+    <None Include="..\..\.github\ISSUE_TEMPLATE.md" />
+    <None Include="..\..\.github\PULL_REQUEST_TEMPLATE.md" />
     <None Include="..\..\src\history\readme.md">
       <Filter>history</Filter>
     </None>
@@ -1570,6 +1631,10 @@
     </None>
     <None Include="..\..\src\history\serialize-tests\stellar-history.testnet.6714239.json">
       <Filter>history\tests\serialize-tests</Filter>
+    </None>
+    <None Include="..\..\performance-eval.md" />
+    <None Include="..\..\docs\metrics.md">
+      <Filter>docs</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

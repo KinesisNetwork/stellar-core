@@ -2,6 +2,9 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
+#include "ledger/LedgerState.h"
+#include "ledger/LedgerStateEntry.h"
+#include "ledger/LedgerStateHeader.h"
 #include "lib/catch.hpp"
 #include "test/TestAccount.h"
 #include "test/TestExceptions.h"
@@ -9,6 +12,7 @@
 #include "test/TestUtils.h"
 #include "test/TxTests.h"
 #include "test/test.h"
+#include "transactions/TransactionUtils.h"
 #include "util/Timer.h"
 
 #include <deque>
@@ -89,22 +93,22 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
     // set up world
     auto root = TestAccount::createRoot(*app);
     auto xlm = makeNativeAsset();
-    auto txfee = app->getLedgerManager().getTxFee();
+    auto txfee = app->getLedgerManager().getLastTxFee();
 
-    auto const minBalanceNoTx = app->getLedgerManager().getMinBalance(0);
+    auto const minBalanceNoTx = app->getLedgerManager().getLastMinBalance(0);
     auto const minBalance =
-        app->getLedgerManager().getMinBalance(0) + 10 * txfee;
+        app->getLedgerManager().getLastMinBalance(0) + 10 * txfee;
 
     auto const minBalance1 =
-        app->getLedgerManager().getMinBalance(1) + 10 * txfee;
+        app->getLedgerManager().getLastMinBalance(1) + 10 * txfee;
     auto const minBalance2 =
-        app->getLedgerManager().getMinBalance(2) + 10 * txfee;
+        app->getLedgerManager().getLastMinBalance(2) + 10 * txfee;
     auto const minBalance3 =
-        app->getLedgerManager().getMinBalance(3) + 10 * txfee;
+        app->getLedgerManager().getLastMinBalance(3) + 10 * txfee;
     auto const minBalance4 =
-        app->getLedgerManager().getMinBalance(4) + 10 * txfee;
+        app->getLedgerManager().getLastMinBalance(4) + 10 * txfee;
     auto const minBalance5 =
-        app->getLedgerManager().getMinBalance(5) + 10 * txfee;
+        app->getLedgerManager().getLastMinBalance(5) + 10 * txfee;
 
     auto const paymentAmount = minBalance3;
     auto const morePayment = paymentAmount / 2;
@@ -123,6 +127,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
     auto usd = makeAsset(gateway2, "USD");
     auto cur3 = makeAsset(gateway2, "CUR3");
     auto cur4 = makeAsset(gateway2, "CUR4");
+
+    closeLedgerOn(*app, 2, 1, 1, 2016);
 
     SECTION("path payment destination amount 0")
     {
@@ -351,12 +357,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
         auto noAuthorizedSourceTrust =
             root.create("no-authorized-source-trust", minBalance1);
         auto destination = root.create("destination", minBalance1);
-        auto setFlags = uint32_t{AUTH_REQUIRED_FLAG | AUTH_REVOCABLE_FLAG};
         noAuthorizedSourceTrust.changeTrust(idr, 20);
         gateway.pay(noAuthorizedSourceTrust, idr, 10);
         destination.changeTrust(idr, 20);
-        gateway.setOptions(nullptr, &setFlags, nullptr, nullptr, nullptr,
-                           nullptr);
+        gateway.setOptions(
+            setFlags(uint32_t{AUTH_REQUIRED_FLAG | AUTH_REVOCABLE_FLAG}));
         gateway.denyTrust(idr, noAuthorizedSourceTrust);
         for_all_versions(*app, [&] {
             REQUIRE_THROWS_AS(
@@ -468,12 +473,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
         auto source = root.create("source", minBalance1);
         auto noAuthorizedDestinationTrust =
             root.create("no-authorized-destination-trust", minBalance1);
-        auto setFlags = uint32_t{AUTH_REQUIRED_FLAG | AUTH_REVOCABLE_FLAG};
         source.changeTrust(idr, 20);
         gateway.pay(source, idr, 10);
         noAuthorizedDestinationTrust.changeTrust(idr, 20);
-        gateway.setOptions(nullptr, &setFlags, nullptr, nullptr, nullptr,
-                           nullptr);
+        gateway.setOptions(
+            setFlags(uint32_t{AUTH_REQUIRED_FLAG | AUTH_REVOCABLE_FLAG}));
         gateway.denyTrust(idr, noAuthorizedDestinationTrust);
         for_all_versions(*app, [&] {
             REQUIRE_THROWS_AS(
@@ -1679,9 +1683,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm12a.changeTrust(cur1, 5);
+        for_versions_to(9, *app, [&] {
+            mm12a.changeTrust(cur1, 5);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, {cur2, cur1, Price{2, 1}, 2}},
@@ -1708,6 +1712,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(mm12a.changeTrust(cur1, 5),
+                              ex_CHANGE_TRUST_INVALID_LIMIT);
         });
     }
 
@@ -1751,9 +1760,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm23a.changeTrust(cur2, 5);
+        for_versions_to(9, *app, [&] {
+            mm23a.changeTrust(cur2, 5);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2a.key, OfferState::DELETED},
@@ -1780,6 +1789,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(mm23a.changeTrust(cur2, 5),
+                              ex_CHANGE_TRUST_INVALID_LIMIT);
         });
     }
 
@@ -1823,9 +1837,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34b, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm34a.changeTrust(cur3, 2);
+        for_versions_to(9, *app, [&] {
+            mm34a.changeTrust(cur3, 2);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2.key, OfferState::DELETED},
@@ -1852,6 +1866,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34b, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 18}, {cur4, 1}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(mm34a.changeTrust(cur3, 2),
+                              ex_CHANGE_TRUST_INVALID_LIMIT);
         });
     }
 
@@ -1897,10 +1916,10 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
 
         SECTION("missing selling line")
         {
-            mm12a.pay(gateway, cur2, 40);
-            mm12a.changeTrust(cur2, 0);
+            for_versions_to(9, *app, [&] {
+                mm12a.pay(gateway, cur2, 40);
+                mm12a.changeTrust(cur2, 0);
 
-            for_all_versions(*app, [&] {
                 auto actual = std::vector<ClaimOfferAtom>{};
                 market.requireChanges(
                     {{o1a.key, OfferState::DELETED},
@@ -1928,13 +1947,18 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                      {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
                 // clang-format on
             });
+
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(mm12a.pay(gateway, cur2, 40),
+                                  ex_PAYMENT_UNDERFUNDED);
+            });
         }
 
         SECTION("missing buying line")
         {
-            mm12a.changeTrust(cur1, 0);
+            for_versions_to(9, *app, [&] {
+                mm12a.changeTrust(cur1, 0);
 
-            for_all_versions(*app, [&] {
                 auto actual = std::vector<ClaimOfferAtom>{};
                 market.requireChanges(
                     {{o1a.key, OfferState::DELETED},
@@ -1961,6 +1985,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                      {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                      {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
                 // clang-format on
+            });
+
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(mm12a.changeTrust(cur1, 0),
+                                  ex_CHANGE_TRUST_INVALID_LIMIT);
             });
         }
     }
@@ -2007,10 +2036,10 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
 
         SECTION("missing selling line")
         {
-            mm23a.pay(gateway2, cur3, 20);
-            mm23a.changeTrust(cur3, 0);
+            for_versions_to(9, *app, [&] {
+                mm23a.pay(gateway2, cur3, 20);
+                mm23a.changeTrust(cur3, 0);
 
-            for_all_versions(*app, [&] {
                 auto actual = std::vector<ClaimOfferAtom>{};
                 market.requireChanges(
                     {{o1.key, OfferState::DELETED},
@@ -2038,13 +2067,18 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                      {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
                 // clang-format on
             });
+
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(mm23a.pay(gateway2, cur3, 20),
+                                  ex_PAYMENT_UNDERFUNDED);
+            });
         }
 
         SECTION("missing buying line")
         {
-            mm23a.changeTrust(cur2, 0);
+            for_versions_to(9, *app, [&] {
+                mm23a.changeTrust(cur2, 0);
 
-            for_all_versions(*app, [&] {
                 auto actual = std::vector<ClaimOfferAtom>{};
                 market.requireChanges(
                     {{o1.key, OfferState::DELETED},
@@ -2071,6 +2105,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                      {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                      {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
                 // clang-format on
+            });
+
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(mm23a.changeTrust(cur2, 0),
+                                  ex_CHANGE_TRUST_INVALID_LIMIT);
             });
         }
     }
@@ -2117,10 +2156,10 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
 
         SECTION("missing selling line")
         {
-            mm34a.pay(gateway2, cur4, 10);
-            mm34a.changeTrust(cur4, 0);
+            for_versions_to(9, *app, [&] {
+                mm34a.pay(gateway2, cur4, 10);
+                mm34a.changeTrust(cur4, 0);
 
-            for_all_versions(*app, [&] {
                 auto actual = std::vector<ClaimOfferAtom>{};
                 market.requireChanges(
                     {{o1.key, OfferState::DELETED},
@@ -2148,13 +2187,18 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                      {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
                 // clang-format on
             });
+
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(mm34a.pay(gateway2, cur4, 10),
+                                  ex_PAYMENT_UNDERFUNDED);
+            });
         }
 
         SECTION("missing buying line")
         {
-            mm34a.changeTrust(cur3, 0);
+            for_versions_to(9, *app, [&] {
+                mm34a.changeTrust(cur3, 0);
 
-            for_all_versions(*app, [&] {
                 auto actual = std::vector<ClaimOfferAtom>{};
                 market.requireChanges(
                     {{o1.key, OfferState::DELETED},
@@ -2181,6 +2225,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                      {mm34b, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                      {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
                 // clang-format on
+            });
+
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(mm34a.changeTrust(cur3, 0),
+                                  ex_CHANGE_TRUST_INVALID_LIMIT);
             });
         }
     }
@@ -2226,9 +2275,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm12a.pay(gateway, cur2, 40);
+        for_versions_to(9, *app, [&] {
+            mm12a.pay(gateway, cur2, 40);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, OfferState::DELETED},
@@ -2255,6 +2304,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(mm12a.pay(gateway, cur2, 40),
+                              ex_PAYMENT_UNDERFUNDED);
         });
     }
 
@@ -2299,9 +2353,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm23a.pay(gateway2, cur3, 20);
+        for_versions_to(9, *app, [&] {
+            mm23a.pay(gateway2, cur3, 20);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2a.key, OfferState::DELETED},
@@ -2328,6 +2382,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(mm23a.pay(gateway2, cur3, 20),
+                              ex_PAYMENT_UNDERFUNDED);
         });
     }
 
@@ -2372,9 +2431,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34b, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm34a.pay(gateway2, cur4, 10);
+        for_versions_to(9, *app, [&] {
+            mm34a.pay(gateway2, cur4, 10);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2.key, OfferState::DELETED},
@@ -2401,6 +2460,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34b, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(mm34a.pay(gateway2, cur4, 10),
+                              ex_PAYMENT_UNDERFUNDED);
         });
     }
 
@@ -2445,9 +2509,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        gateway.pay(mm12a, cur1, 200);
+        for_versions_to(9, *app, [&] {
+            gateway.pay(mm12a, cur1, 200);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, OfferState::DELETED},
@@ -2474,6 +2538,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(gateway.pay(mm12a, cur1, 200),
+                              ex_PAYMENT_LINE_FULL);
         });
     }
 
@@ -2518,9 +2587,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        gateway.pay(mm23a, cur2, 200);
+        for_versions_to(9, *app, [&] {
+            gateway.pay(mm23a, cur2, 200);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2a.key, OfferState::DELETED},
@@ -2547,6 +2616,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(gateway.pay(mm23a, cur2, 200),
+                              ex_PAYMENT_LINE_FULL);
         });
     }
 
@@ -2591,9 +2665,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34b, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        gateway2.pay(mm34a, cur3, 200);
+        for_versions_to(9, *app, [&] {
+            gateway2.pay(mm34a, cur3, 200);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2.key, OfferState::DELETED},
@@ -2620,6 +2694,11 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {mm34b, {{xlm, minBalance3 - 3 * txfee}, {cur1, 0}, {cur2, 0}, {cur3, 20}, {cur4, 0}}},
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
+        });
+
+        for_versions_from(10, *app, [&] {
+            REQUIRE_THROWS_AS(gateway2.pay(mm34a, cur3, 200),
+                              ex_PAYMENT_LINE_FULL);
         });
     }
 
@@ -2664,9 +2743,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm12a.pay(gateway, cur2, 39);
-
         for_versions_to(2, *app, [&] {
+            mm12a.pay(gateway, cur2, 39);
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, OfferState::DELETED},
@@ -2694,7 +2773,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
-        for_versions_from(3, *app, [&] {
+        for_versions(3, 9, *app, [&] {
+            mm12a.pay(gateway, cur2, 39);
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, {cur2, cur1, Price{2, 1}, 1}},
@@ -2722,6 +2803,17 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
+        // This is no longer possible starting in version 10, as it is
+        // impossible to have an offer with excess selling liabilities. This can
+        // be verified from the following tests:
+        //   - Cannot use PaymentOp or PathPaymentOp to reduce balance below
+        //     selling liabilities (tested in "payment"/"pathpayment" section
+        //     "liabilities" subsection "cannot pay balance below selling
+        //     liabilities")
+        //   - Cannot use ManageOfferOp (or CreatePassiveOfferOp) to
+        //     create an offer with excess selling liabilities (tested in
+        //     "create offer" section "cannot create offer that would
+        //     lead to excess liabilities" subsection "* selling liabilities")
     }
 
     SECTION("path payment 1 in trust line for selling asset for offer for "
@@ -2765,9 +2857,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm23a.pay(gateway2, cur3, 19);
-
         for_versions_to(2, *app, [&] {
+            mm23a.pay(gateway2, cur3, 19);
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2a.key, OfferState::DELETED},
@@ -2795,7 +2887,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
-        for_versions_from(3, *app, [&] {
+        for_versions(3, 9, *app, [&] {
+            mm23a.pay(gateway2, cur3, 19);
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, {cur2, cur1, Price{2, 1}, 1}},
                                    {o2a.key, OfferState::DELETED},
@@ -2823,6 +2917,17 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
+        // This is no longer possible starting in version 10, as it is
+        // impossible to have an offer with excess selling liabilities. This can
+        // be verified from the following tests:
+        //   - Cannot use PaymentOp or PathPaymentOp to reduce balance below
+        //     selling liabilities (tested in "payment"/"pathpayment" section
+        //     "liabilities" subsection "cannot pay balance below selling
+        //     liabilities")
+        //   - Cannot use ManageOfferOp (or CreatePassiveOfferOp) to
+        //     create an offer with excess selling liabilities (tested in
+        //     "create offer" section "cannot create offer that would
+        //     lead to excess liabilities" subsection "* selling liabilities")
     }
 
     SECTION("path payment 1 in trust line for selling asset for offer for last "
@@ -2866,9 +2971,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34b, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        mm34a.pay(gateway2, cur4, 9);
-
         for_versions_to(2, *app, [&] {
+            mm34a.pay(gateway2, cur4, 9);
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2.key, OfferState::DELETED},
@@ -2896,7 +3001,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
-        for_versions_from(3, *app, [&] {
+        for_versions(3, 9, *app, [&] {
+            mm34a.pay(gateway2, cur4, 9);
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, {cur2, cur1, Price{2, 1}, 2}},
                                    {o2.key, {cur3, cur2, Price{2, 1}, 1}},
@@ -2924,6 +3031,17 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
+        // This is no longer possible starting in version 10, as it is
+        // impossible to have an offer with excess selling liabilities. This can
+        // be verified from the following tests:
+        //   - Cannot use PaymentOp or PathPaymentOp to reduce balance below
+        //     selling liabilities (tested in "payment"/"pathpayment" section
+        //     "liabilities" subsection "cannot pay balance below selling
+        //     liabilities")
+        //   - Cannot use ManageOfferOp (or CreatePassiveOfferOp) to
+        //     create an offer with excess selling liabilities (tested in
+        //     "create offer" section "cannot create offer that would
+        //     lead to excess liabilities" subsection "* selling liabilities")
     }
 
     SECTION("path payment 1 left in trust line for buying asset for offer for "
@@ -2967,9 +3085,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        gateway.pay(mm12a, cur1, 199);
+        for_versions_to(9, *app, [&] {
+            gateway.pay(mm12a, cur1, 199);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, OfferState::DELETED},
@@ -2997,6 +3115,21 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
+        // This is no longer possible starting in version 10, as it is
+        // impossible to have an offer that can take a trust line above
+        // its limit. This can be verified from the following tests:
+        //   - Cannot use PaymentOp or PathPaymentOp to increase balance +
+        //     buying liabilities above limit (tested in "payment"/"pathpayment"
+        //     section "liabilities" subsection "cannot receive such that
+        //     balance + buying liabilities exceeds limit")
+        //   - Cannot use ChangeTrustOp to reduce limit below balance +
+        //     buying liabilities (tested in "change trust" section
+        //     "cannot reduce limit below buying liabilities or delete")
+        //   - Cannot use ManageOfferOp (or CreatePassiveOfferOp) to
+        //     create an offer with excess buying liabilities (tested in
+        //     "create offer" section "cannot create offer that would
+        //     lead to excess liabilities" subsection "non-native buying
+        //     liabilities")
     }
 
     SECTION("path payment 1 left in trust line for buying asset for offer for "
@@ -3040,9 +3173,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        gateway.pay(mm23a, cur2, 199);
+        for_versions_to(9, *app, [&] {
+            gateway.pay(mm23a, cur2, 199);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2a.key, OfferState::DELETED},
@@ -3070,6 +3203,21 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
+        // This is no longer possible starting in version 10, as it is
+        // impossible to have an offer that can take a trust line above
+        // its limit. This can be verified from the following tests:
+        //   - Cannot use PaymentOp or PathPaymentOp to increase balance +
+        //     buying liabilities above limit (tested in "payment"/"pathpayment"
+        //     section "liabilities" subsection "cannot receive such that
+        //     balance + buying liabilities exceeds limit")
+        //   - Cannot use ChangeTrustOp to reduce limit below balance +
+        //     buying liabilities (tested in "change trust" section
+        //     "cannot reduce limit below buying liabilities or delete")
+        //   - Cannot use ManageOfferOp (or CreatePassiveOfferOp) to
+        //     create an offer with excess buying liabilities (tested in
+        //     "create offer" section "cannot create offer that would
+        //     lead to excess liabilities" subsection "non-native buying
+        //     liabilities")
     }
 
     SECTION("path payment 1 left in trust line for buying asset for offer for "
@@ -3113,9 +3261,9 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             return market.addOffer(mm34b, {cur4, cur3, Price{2, 1}, 10});
         });
 
-        gateway2.pay(mm34a, cur3, 199);
+        for_versions_to(9, *app, [&] {
+            gateway2.pay(mm34a, cur3, 199);
 
-        for_all_versions(*app, [&] {
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1.key, OfferState::DELETED},
                                    {o2.key, OfferState::DELETED},
@@ -3143,6 +3291,21 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 10}}}});
             // clang-format on
         });
+        // This is no longer possible starting in version 10, as it is
+        // impossible to have an offer that can take a trust line above
+        // its limit. This can be verified from the following tests:
+        //   - Cannot use PaymentOp or PathPaymentOp to increase balance +
+        //     buying liabilities above limit (tested in "payment"/"pathpayment"
+        //     section "liabilities" subsection "cannot receive such that
+        //     balance + buying liabilities exceeds limit")
+        //   - Cannot use ChangeTrustOp to reduce limit below balance +
+        //     buying liabilities (tested in "change trust" section
+        //     "cannot reduce limit below buying liabilities or delete")
+        //   - Cannot use ManageOfferOp (or CreatePassiveOfferOp) to
+        //     create an offer with excess buying liabilities (tested in
+        //     "create offer" section "cannot create offer that would
+        //     lead to excess liabilities" subsection "non-native buying
+        //     liabilities")
     }
 
     SECTION("path payment takes all offers, one offer per exchange")
@@ -3229,35 +3392,35 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
         gateway2.pay(mm23, cur3, 17);
         gateway2.pay(mm34, cur4, 10);
 
-        auto o1a = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm12, {cur2, cur1, Price{3, 2}, 10});
-        });
-        auto o1b = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm12, {cur2, cur1, Price{2, 1}, 9});
-        });
-        auto o1c = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm12, {cur2, cur1, Price{4, 3}, 9});
-        });
-        auto o2a = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm23, {cur3, cur2, Price{2, 1}, 5});
-        });
-        auto o2b = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm23, {cur3, cur2, Price{3, 2}, 5});
-        });
-        auto o2c = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm23, {cur3, cur2, Price{4, 3}, 7});
-        });
-        auto o3a = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm34, {cur4, cur3, Price{4, 3}, 4});
-        });
-        auto o3b = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm34, {cur4, cur3, Price{3, 2}, 3});
-        });
-        auto o3c = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 3});
-        });
-
         for_versions_to(2, *app, [&] {
+            auto o1a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{3, 2}, 10});
+            });
+            auto o1b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{2, 1}, 9});
+            });
+            auto o1c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{4, 3}, 9});
+            });
+            auto o2a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{2, 1}, 5});
+            });
+            auto o2b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{3, 2}, 5});
+            });
+            auto o2c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{4, 3}, 7});
+            });
+            auto o3a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{4, 3}, 4});
+            });
+            auto o3b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{3, 2}, 3});
+            });
+            auto o3c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 3});
+            });
+
             market.requireChanges({}, [&] {
                 REQUIRE_THROWS_AS(source.pay(destination, cur1, 45, cur4, 10,
                                              {cur1, cur2, cur3, cur4}),
@@ -3272,7 +3435,37 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 0}}}});
             // clang-format on
         });
-        for_versions_from(3, *app, [&] {
+        for_versions(3, 9, *app, [&] {
+            // Some of these offers are invalid starting in version 10, so we
+            // can't run this test in that case.
+            auto o1a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{3, 2}, 10});
+            });
+            auto o1b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{2, 1}, 9});
+            });
+            auto o1c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{4, 3}, 9});
+            });
+            auto o2a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{2, 1}, 5});
+            });
+            auto o2b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{3, 2}, 5});
+            });
+            auto o2c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{4, 3}, 7});
+            });
+            auto o3a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{4, 3}, 4});
+            });
+            auto o3b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{3, 2}, 3});
+            });
+            auto o3c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 3});
+            });
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, OfferState::DELETED},
@@ -3332,35 +3525,35 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
         gateway2.pay(mm23, cur3, 17);
         gateway2.pay(mm34, cur4, 10);
 
-        auto o1a = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm12, {cur2, cur1, Price{3, 2}, 10});
-        });
-        auto o1b = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm12, {cur2, cur1, Price{2, 1}, 9});
-        });
-        auto o1c = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm12, {cur2, cur1, Price{4, 3}, 9});
-        });
-        auto o2a = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm23, {cur3, cur2, Price{2, 1}, 5});
-        });
-        auto o2b = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm23, {cur3, cur2, Price{3, 2}, 5});
-        });
-        auto o2c = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm23, {cur3, cur2, Price{4, 3}, 7});
-        });
-        auto o3a = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm34, {cur4, cur3, Price{4, 3}, 4});
-        });
-        auto o3b = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm34, {cur4, cur3, Price{3, 2}, 3});
-        });
-        auto o3c = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 3});
-        });
-
         for_versions_to(2, *app, [&] {
+            auto o1a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{3, 2}, 10});
+            });
+            auto o1b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{2, 1}, 9});
+            });
+            auto o1c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{4, 3}, 9});
+            });
+            auto o2a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{2, 1}, 5});
+            });
+            auto o2b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{3, 2}, 5});
+            });
+            auto o2c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{4, 3}, 7});
+            });
+            auto o3a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{4, 3}, 4});
+            });
+            auto o3b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{3, 2}, 3});
+            });
+            auto o3c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 3});
+            });
+
             market.requireChanges({}, [&] {
                 REQUIRE_THROWS_AS(source.pay(destination, cur1, 29, cur4, 8,
                                              {cur1, cur2, cur3, cur4}),
@@ -3375,7 +3568,37 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                  {destination, {{xlm, minBalance1 - txfee}, {cur1, 0}, {cur2, 0}, {cur3, 0}, {cur4, 0}}}});
             // clang-format on
         });
-        for_versions_from(3, *app, [&] {
+        for_versions(3, 9, *app, [&] {
+            // Some of these offers are invalid starting in version 10, so we
+            // can't run this test in that case.
+            auto o1a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{3, 2}, 10});
+            });
+            auto o1b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{2, 1}, 9});
+            });
+            auto o1c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{4, 3}, 9});
+            });
+            auto o2a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{2, 1}, 5});
+            });
+            auto o2b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{3, 2}, 5});
+            });
+            auto o2c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm23, {cur3, cur2, Price{4, 3}, 7});
+            });
+            auto o3a = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{4, 3}, 4});
+            });
+            auto o3b = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{3, 2}, 3});
+            });
+            auto o3c = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm34, {cur4, cur3, Price{2, 1}, 3});
+            });
+
             auto actual = std::vector<ClaimOfferAtom>{};
             market.requireChanges({{o1a.key, OfferState::DELETED},
                                    {o1b.key, {cur2, cur1, Price{2, 1}, 8}},
@@ -3544,8 +3767,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
 
         auto paymentToReceive = 240000000;
         auto offerSize = paymentToReceive / 2;
-        auto initialBalance =
-            app->getLedgerManager().getMinBalance(10) + txfee * 10 + 1000000000;
+        auto initialBalance = app->getLedgerManager().getLastMinBalance(10) +
+                              txfee * 10 + 1000000000;
         auto mm = root.create("mm", initialBalance);
         auto source = root.create("source", initialBalance);
         auto destination = root.create("destination", initialBalance);
@@ -3555,22 +3778,23 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
         gateway.pay(mm, idr, 1000000000);
         gateway2.pay(mm, usd, 1000000000);
 
-        auto idrCurCheapOffer = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm, {idr, usd, Price{3, 12}, offerSize});
-        });
-        auto idrCurMidBogusOffer = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm, {idr, usd, Price{4, 12}, 1});
-        });
-        auto idrCurExpensiveOffer = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm, {idr, usd, Price{6, 12}, offerSize});
-        });
-        auto usdCurOffer = market.requireChangesWithOffer({}, [&] {
-            return market.addOffer(mm, {usd, xlm, Price{1, 2}, 2 * offerSize});
-        });
-
         auto path = std::vector<Asset>{xlm, usd};
 
         for_versions_to(2, *app, [&] {
+            auto idrCurCheapOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {idr, usd, Price{3, 12}, offerSize});
+            });
+            auto idrCurMidBogusOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {idr, usd, Price{4, 12}, 1});
+            });
+            auto idrCurExpensiveOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {idr, usd, Price{6, 12}, offerSize});
+            });
+            auto usdCurOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm,
+                                       {usd, xlm, Price{1, 2}, 2 * offerSize});
+            });
+
             auto res = source.pay(destination, xlm, 8 * paymentToReceive, idr,
                                   paymentToReceive, path);
 
@@ -3581,7 +3805,23 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                 idrCurExpensiveOffer.exchanged(120000000, 60000000)};
             REQUIRE(res.success().offers == expected);
         });
-        for_versions_from(3, *app, [&] {
+        for_versions(3, 9, *app, [&] {
+            // Some of these offers are invalid starting in version 10, so we
+            // can't run this test in that case.
+            auto idrCurCheapOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {idr, usd, Price{3, 12}, offerSize});
+            });
+            auto idrCurMidBogusOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {idr, usd, Price{4, 12}, 1});
+            });
+            auto idrCurExpensiveOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {idr, usd, Price{6, 12}, offerSize});
+            });
+            auto usdCurOffer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm,
+                                       {usd, xlm, Price{1, 2}, 2 * offerSize});
+            });
+
             auto res = source.pay(destination, xlm, 8 * paymentToReceive, idr,
                                   paymentToReceive, path);
 
@@ -3641,7 +3881,7 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                  // as in the
             // offer because of Price{2, 1} that is
             // used in one case
-            auto txFee = app->getLedgerManager().getTxFee();
+            auto txFee = app->getLedgerManager().getLastTxFee();
 
             auto assets = std::deque<Asset>{xlm, usd, idr};
             int pathSize = (int)assets.size();
@@ -3671,8 +3911,8 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                 }
                 else
                 {
-                    REQUIRE(loadTrustLine(account, assets[assetIndex], *app)
-                                ->getBalance() == initialBalance + difference);
+                    REQUIRE(account.loadTrustLine(assets[assetIndex]).balance ==
+                            initialBalance + difference);
                 }
             };
             auto validateAccountAssets = [&](const TestAccount& account,
@@ -3685,11 +3925,13 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
                                          feeCount);
                 }
             };
-            auto validateOffer = [offerAmount](const TestAccount& account,
-                                               uint64_t offerId,
-                                               int64_t difference) {
-                auto offer = account.loadOffer(offerId);
-                REQUIRE(offer.amount == offerAmount + difference);
+            auto validateOffer = [&](const TestAccount& account,
+                                     uint64_t offerId, int64_t difference) {
+                LedgerState ls(app->getLedgerStateRoot());
+                auto offer =
+                    stellar::loadOffer(ls, account.getPublicKey(), offerId);
+                auto const& oe = offer.current().data.offer();
+                REQUIRE(oe.amount == offerAmount + difference);
             };
 
             auto source = setupAccount("S");
@@ -3807,5 +4049,146 @@ TEST_CASE("pathpayment", "[tx][pathpayment]")
             // wise to do)
             testPath("anti-arbitrage with big sendmax", Price(2, 1), 8, false);
         });
+    }
+
+    SECTION("path payment rounding")
+    {
+        auto source =
+            root.create("source", app->getLedgerManager().getLastMinBalance(1) +
+                                      10 * txfee);
+        auto mm = root.create(
+            "mm", app->getLedgerManager().getLastMinBalance(4) + 10 * txfee);
+        auto destination = root.create(
+            "destination",
+            app->getLedgerManager().getLastMinBalance(1) + 10 * txfee);
+
+        SECTION("exchangeV10 recalculate sheepValue: 1 offer")
+        {
+            source.changeTrust(cur1, 2);
+            mm.changeTrust(cur1, 2);
+            mm.changeTrust(cur2, 2000);
+            destination.changeTrust(cur2, 1001);
+
+            gateway.pay(source, cur1, 2);
+            gateway.pay(mm, cur2, 2000);
+
+            auto market = TestMarket{*app};
+            auto o1 = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {cur2, cur1, Price{1, 1000}, 2000});
+            });
+
+            for_versions_from(10, *app, [&] {
+                market.requireChanges({{o1.key, OfferState::DELETED}}, [&] {
+                    source.pay(destination, cur1, 2, cur2, 1001, {cur1, cur2});
+                });
+                market.requireBalances({{source, {{cur1, 0}}},
+                                        {mm, {{cur1, 2}, {cur2, 999}}},
+                                        {destination, {{cur2, 1001}}}});
+            });
+        }
+
+        SECTION("exchangeV10 recalculate sheepValue: 2 offers")
+        {
+            source.changeTrust(cur1, 7);
+            mm.changeTrust(cur1, 10);
+            mm.changeTrust(cur2, 10000);
+            destination.changeTrust(cur2, 6001);
+
+            gateway.pay(source, cur1, 7);
+            gateway.pay(mm, cur2, 10000);
+
+            auto market = TestMarket{*app};
+            auto o1 = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {cur2, cur1, Price{1, 1000}, 5000});
+            });
+            auto o2 = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm, {cur2, cur1, Price{1, 1000}, 5000});
+            });
+
+            for_versions_from(10, *app, [&] {
+                market.requireChanges(
+                    {{o1.key, OfferState::DELETED},
+                     {o2.key, {cur2, cur1, Price{1, 1000}, 3000}}},
+                    [&] {
+                        source.pay(destination, cur1, 7, cur2, 6001,
+                                   {cur1, cur2});
+                    });
+                market.requireBalances({{source, {{cur1, 0}}},
+                                        {mm, {{cur1, 7}, {cur2, 3999}}},
+                                        {destination, {{cur2, 6001}}}});
+            });
+        }
+    }
+
+    SECTION("liabilities")
+    {
+        SECTION("cannot pay balance below selling liabilities")
+        {
+            TestMarket market(*app);
+            auto source = root.create("source", minBalance2);
+            auto destination = root.create("destination", minBalance2);
+            auto mm12 = root.create("mm12", minBalance3);
+
+            source.changeTrust(cur1, 200);
+            mm12.changeTrust(cur1, 200);
+            mm12.changeTrust(cur2, 200);
+            destination.changeTrust(cur2, 200);
+
+            gateway.pay(source, cur1, 100);
+            gateway.pay(mm12, cur2, 100);
+
+            auto offer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(source, {cur1, xlm, Price{1, 1}, 50});
+            });
+            auto o2 = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{1, 1}, 100});
+            });
+
+            for_versions_to(9, *app, [&] {
+                source.pay(destination, cur1, 51, cur2, 51, {cur1, cur2});
+            });
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(
+                    source.pay(destination, cur1, 51, cur2, 51, {cur1, cur2}),
+                    ex_PATH_PAYMENT_UNDERFUNDED);
+                source.pay(destination, cur1, 50, cur2, 50, {cur1, cur2});
+            });
+        }
+
+        SECTION("cannot receive such that balance + buying liabilities exceeds"
+                " limit")
+        {
+            TestMarket market(*app);
+            auto source = root.create("source", minBalance2);
+            auto destination = root.create("destination", minBalance2);
+            auto mm12 = root.create("mm12", minBalance3);
+
+            source.changeTrust(cur1, 200);
+            mm12.changeTrust(cur1, 200);
+            mm12.changeTrust(cur2, 200);
+            destination.changeTrust(cur2, 200);
+
+            gateway.pay(source, cur1, 100);
+            gateway.pay(mm12, cur2, 100);
+            gateway.pay(destination, cur2, 100);
+
+            auto offer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(destination,
+                                       {xlm, cur2, Price{1, 1}, 50});
+            });
+            auto o2 = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(mm12, {cur2, cur1, Price{1, 1}, 100});
+            });
+
+            for_versions_to(9, *app, [&] {
+                source.pay(destination, cur1, 51, cur2, 51, {cur1, cur2});
+            });
+            for_versions_from(10, *app, [&] {
+                REQUIRE_THROWS_AS(
+                    source.pay(destination, cur1, 51, cur2, 51, {cur1, cur2}),
+                    ex_PATH_PAYMENT_LINE_FULL);
+                source.pay(destination, cur1, 50, cur2, 50, {cur1, cur2});
+            });
+        }
     }
 }

@@ -28,10 +28,7 @@ class HistoryManagerImpl : public HistoryManager
     PublishQueueBuckets mPublishQueueBuckets;
     bool mPublishQueueBucketsFilled{false};
 
-    medida::Meter& mPublishSkip;
-    medida::Meter& mPublishQueue;
-    medida::Meter& mPublishDelay;
-    medida::Meter& mPublishStart;
+    int mPublishQueued{0};
     medida::Meter& mPublishSuccess;
     medida::Meter& mPublishFailure;
 
@@ -41,14 +38,10 @@ class HistoryManagerImpl : public HistoryManager
     HistoryManagerImpl(Application& app);
     ~HistoryManagerImpl() override;
 
-    std::shared_ptr<HistoryArchive>
-    selectRandomReadableHistoryArchive() override;
-
     uint32_t getCheckpointFrequency() const override;
     uint32_t checkpointContainingLedger(uint32_t ledger) const override;
     uint32_t prevCheckpointLedger(uint32_t ledger) const override;
     uint32_t nextCheckpointLedger(uint32_t ledger) const override;
-    uint64_t nextCheckpointCatchupProbe(uint32_t ledger) const override;
 
     void logAndUpdatePublishStatus() override;
 
@@ -59,8 +52,6 @@ class HistoryManagerImpl : public HistoryManager
     void queueCurrentHistory() override;
 
     void takeSnapshotAndPublish(HistoryArchiveState const& has);
-
-    bool hasAnyWritableHistoryArchive() override;
 
     uint32_t getMinLedgerQueuedToPublish() override;
 
@@ -91,10 +82,7 @@ class HistoryManagerImpl : public HistoryManager
 
     std::string localFilename(std::string const& basename) override;
 
-    uint64_t getPublishSkipCount() override;
     uint64_t getPublishQueueCount() override;
-    uint64_t getPublishDelayCount() override;
-    uint64_t getPublishStartCount() override;
     uint64_t getPublishSuccessCount() override;
     uint64_t getPublishFailureCount() override;
 };

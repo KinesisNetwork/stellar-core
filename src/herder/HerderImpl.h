@@ -9,6 +9,7 @@
 #include "herder/HerderSCPDriver.h"
 #include "herder/Upgrades.h"
 #include "util/Timer.h"
+#include "util/XDROperators.h"
 #include <deque>
 #include <memory>
 #include <unordered_map>
@@ -26,9 +27,6 @@ namespace stellar
 class Application;
 class LedgerManager;
 class HerderSCPDriver;
-
-using xdr::operator<;
-using xdr::operator==;
 
 /*
  * Is in charge of receiving transactions from the network.
@@ -66,12 +64,12 @@ class HerderImpl : public Herder
                                    const SCPQuorumSet& qset,
                                    TxSetFrame txset) override;
 
-    void sendSCPStateToPeer(uint32 ledgerSeq, PeerPtr peer) override;
+    void sendSCPStateToPeer(uint32 ledgerSeq, Peer::pointer peer) override;
 
     bool recvSCPQuorumSet(Hash const& hash, const SCPQuorumSet& qset) override;
     bool recvTxSet(Hash const& hash, const TxSetFrame& txset) override;
     void peerDoesntHave(MessageType type, uint256 const& itemID,
-                        PeerPtr peer) override;
+                        Peer::pointer peer) override;
     TxSetFramePtr getTxSet(Hash const& hash) override;
     SCPQuorumSetPtr getQSet(Hash const& qSetHash) override;
 
@@ -88,9 +86,9 @@ class HerderImpl : public Herder
 
     bool resolveNodeID(std::string const& s, PublicKey& retKey) override;
 
-    void dumpInfo(Json::Value& ret, size_t limit) override;
-    void dumpQuorumInfo(Json::Value& ret, NodeID const& id, bool summary,
-                        uint64 index) override;
+    Json::Value getJsonInfo(size_t limit) override;
+    Json::Value getJsonQuorumInfo(NodeID const& id, bool summary,
+                                  uint64 index) override;
 
     struct TxMap
     {
@@ -109,8 +107,6 @@ class HerderImpl : public Herder
     void startRebroadcastTimer();
     void rebroadcast();
     void broadcast(SCPEnvelope const& e);
-
-    void updateSCPCounters();
 
     void processSCPQueueUpToIndex(uint64 slotIndex);
 
@@ -161,15 +157,8 @@ class HerderImpl : public Herder
     {
         medida::Meter& mLostSync;
 
-        medida::Meter& mBallotExpire;
-
         medida::Meter& mEnvelopeEmit;
         medida::Meter& mEnvelopeReceive;
-
-        // Counters for stuff in parent class (SCP)
-        // that we monitor on a best-effort basis from
-        // here.
-        medida::Counter& mKnownSlotsSize;
 
         // Counters for things reached-through the
         // SCP maps: Slots and Nodes

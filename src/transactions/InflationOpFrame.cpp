@@ -7,10 +7,14 @@
 #include "ledger/AccountFrame.h"
 #include "ledger/LedgerDelta.h"
 #include "ledger/LedgerManager.h"
+#include "ledger/LedgerState.h"
+#include "ledger/LedgerStateEntry.h"
+#include "ledger/LedgerStateHeader.h"
 #include "main/Application.h"
 #include "medida/meter.h"
 #include "medida/metrics_registry.h"
 #include "overlay/StellarXDR.h"
+#include "transactions/TransactionUtils.h"
 
 const uint32_t INFLATION_FREQUENCY = (60 * 60 * 24 * 7); // every seven days
 // inflation is .000190721 per 7 days, or 1% a year
@@ -29,15 +33,12 @@ InflationOpFrame::InflationOpFrame(Operation const& op, OperationResult& res,
 }
 
 bool
-InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
-                          LedgerManager& ledgerManager)
+InflationOpFrame::doApply(Application& app, AbstractLedgerState& ls)
 {
-    LedgerDelta inflationDelta(delta);
-
-    auto& lcl = inflationDelta.getHeader();
-
-    time_t closeTime = lcl.scpValue.closeTime;
-    uint64_t seq = lcl.inflationSeq;
+    auto header = ls.loadHeader();
+    auto& lh = header.current();
+    time_t closeTime = lh.scpValue.closeTime;
+    uint64_t seq = lh.inflationSeq;
 
     time_t inflationTime = (INFLATION_START_TIME + seq * INFLATION_FREQUENCY);
     if (closeTime < inflationTime)
@@ -80,8 +81,8 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     auto inflationAmount = 0;
     auto amountToDole = inflationAmount + lcl.feePool;
 
-    lcl.feePool = 0;
-    lcl.inflationSeq++;
+    lh.feePool = 0;
+    lh.inflationSeq++;
 
     // now credit each account
     innerResult().code(INFLATION_SUCCESS);
@@ -143,13 +144,11 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
     // }
 
     // put back in fee pool as unclaimed funds
-    lcl.feePool += leftAfterDole;
-    if (ledgerManager.getCurrentLedgerVersion() > 7)
+    lh.feePool += leftAfterDole;
+    if (lh.ledgerVersion > 7)
     {
-        lcl.totalCoins += inflationAmount;
+        lh.totalCoins += inflationAmount;
     }
-
-    inflationDelta.commit();
 
     app.getMetrics()
         .NewMeter({"op-inflation", "success", "apply"}, "operation")
@@ -158,7 +157,7 @@ InflationOpFrame::doApply(Application& app, LedgerDelta& delta,
 }
 
 bool
-InflationOpFrame::doCheckValid(Application& app)
+InflationOpFrame::doCheckValid(Application& app, uint32_t ledgerVersion)
 {
     return true;
 }

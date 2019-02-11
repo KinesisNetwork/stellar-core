@@ -18,7 +18,6 @@ class LoopbackPeerConnection;
 
 namespace testutil
 {
-void setCurrentLedgerVersion(LedgerManager& lm, uint32_t currentLedgerVersion);
 void crankSome(VirtualClock& clock);
 void injectSendPeersAndReschedule(VirtualClock::time_point& end,
                                   VirtualClock& clock, VirtualTimer& timer,
@@ -62,7 +61,6 @@ std::shared_ptr<T>
 createTestApplication(VirtualClock& clock, Config const& cfg)
 {
     Config c2(cfg);
-    c2.USE_CONFIG_FOR_GENESIS = true;
     auto app = Application::create<T>(clock, c2);
     return app;
 }

@@ -9,6 +9,7 @@
 #include "util/SecretValue.h"
 #include "util/Timer.h"
 #include "util/optional.h"
+
 #include <map>
 #include <memory>
 #include <string>
@@ -17,7 +18,13 @@
 
 namespace stellar
 {
-class HistoryArchive;
+struct HistoryArchiveConfiguration
+{
+    std::string mName;
+    std::string mGetCmd;
+    std::string mPutCmd;
+    std::string mMkdirCmd;
+};
 
 class Config : public std::enable_shared_from_this<Config>
 {
@@ -126,6 +133,10 @@ class Config : public std::enable_shared_from_this<Config>
     //  aren't concerned with byzantine failures.
     bool UNSAFE_QUORUM;
 
+    // If set to true, bucket GC will not be performed. It can lead to massive
+    // disk usage, but it is useful for recovering of nodes.
+    bool DISABLE_BUCKET_GC;
+
     // Set of cursors added at each startup with value '1'.
     std::vector<std::string> KNOWN_CURSORS;
 
@@ -190,7 +201,7 @@ class Config : public std::enable_shared_from_this<Config>
     std::map<std::string, std::string> VALIDATOR_NAMES;
 
     // History config
-    std::map<std::string, std::shared_ptr<HistoryArchive>> HISTORY;
+    std::map<std::string, HistoryArchiveConfiguration> HISTORY;
 
     // Database config
     SecretValue DATABASE;
@@ -200,6 +211,15 @@ class Config : public std::enable_shared_from_this<Config>
 
     std::string NTP_SERVER; // ntp server used to check if time is valid on host
 
+    // Data layer cache configuration
+    // - ENTRY_CACHE_SIZE controls the maximum number of LedgerEntry objects
+    //   that will be stored in the cache
+    // - BEST_OFFERS_CACHE_SIZE controls the maximum number of Asset pairs that
+    //   will be stored in the cache, although many LedgerEntry objects may be
+    //   associated with a single Asset pair
+    size_t ENTRY_CACHE_SIZE;
+    size_t BEST_OFFERS_CACHE_SIZE;
+
     Config();
 
     void load(std::string const& filename);
@@ -208,5 +228,9 @@ class Config : public std::enable_shared_from_this<Config>
     std::string toStrKey(PublicKey const& pk, bool& isAlias) const;
     std::string toStrKey(PublicKey const& pk) const;
     bool resolveNodeID(std::string const& s, PublicKey& retKey) const;
+
+    std::chrono::seconds getExpectedLedgerCloseTime() const;
+
+    void setNoListen();
 };
 } // namespace stellar

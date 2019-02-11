@@ -6,17 +6,15 @@
 
 #include "crypto/SecretKey.h"
 #include "herder/LedgerCloseData.h"
-#include "ledger/AccountFrame.h"
-#include "ledger/OfferFrame.h"
-#include "ledger/TrustFrame.h"
 #include "overlay/StellarXDR.h"
 #include "test/TestPrinter.h"
 #include "util/optional.h"
 
 namespace stellar
 {
+class AbstractLedgerState;
+class ConstLedgerStateEntry;
 class TransactionFrame;
-class LedgerDelta;
 class OperationFrame;
 class TxSetFrame;
 
@@ -26,16 +24,52 @@ namespace txtest
 typedef std::vector<std::pair<TransactionResultPair, LedgerEntryChanges>>
     TxSetResultMeta;
 
-struct ThresholdSetter
+struct ExpectedOpResult
+{
+    OperationResult mOperationResult;
+
+    ExpectedOpResult(OperationResultCode code);
+    ExpectedOpResult(CreateAccountResultCode createAccountCode);
+    ExpectedOpResult(PaymentResultCode paymentCode);
+    ExpectedOpResult(AccountMergeResultCode accountMergeCode);
+    ExpectedOpResult(AccountMergeResultCode accountMergeCode,
+                     int64_t sourceAccountBalance);
+    ExpectedOpResult(SetOptionsResultCode setOptionsResultCode);
+};
+
+struct ValidationResult
+{
+    int64_t fee;
+    TransactionResultCode code;
+};
+
+struct SetOptionsArguments
 {
     optional<int> masterWeight;
     optional<int> lowThreshold;
     optional<int> medThreshold;
     optional<int> highThreshold;
+    optional<Signer> signer;
+    optional<uint32_t> setFlags;
+    optional<uint32_t> clearFlags;
+    optional<AccountID> inflationDest;
+    optional<std::string> homeDomain;
+
+    friend SetOptionsArguments operator|(SetOptionsArguments const& x,
+                                         SetOptionsArguments const& y);
 };
 
-bool applyCheck(TransactionFramePtr tx, Application& app);
-void applyTx(TransactionFramePtr const& tx, Application& app);
+TransactionResult expectedResult(int64_t fee, size_t opsCount,
+                                 TransactionResultCode code,
+                                 std::vector<ExpectedOpResult> ops = {});
+
+bool applyCheck(TransactionFramePtr tx, Application& app,
+                bool checkSeqNum = true);
+void applyTx(TransactionFramePtr const& tx, Application& app,
+             bool checkSeqNum = true);
+void validateTxResults(TransactionFramePtr const& tx, Application& app,
+                       ValidationResult validationResult,
+                       TransactionResult const& applyResult = {});
 
 TxSetResultMeta closeLedgerOn(Application& app, uint32 ledgerSeq, int day,
                               int month, int year,
@@ -45,18 +79,12 @@ SecretKey getRoot(Hash const& networkID);
 
 SecretKey getAccount(const char* n);
 
-// shorthand to load an existing account
-AccountFrame::pointer loadAccount(PublicKey const& k, Application& app,
+Signer makeSigner(SecretKey key, int weight);
+
+ConstLedgerStateEntry loadAccount(AbstractLedgerState& ls, PublicKey const& k,
                                   bool mustExist = true);
 
-// short hand to check that an account does not exist
-void requireNoAccount(PublicKey const& k, Application& app);
-
-OfferFrame::pointer loadOffer(PublicKey const& k, uint64 offerID,
-                              Application& app, bool mustExist);
-
-TrustFrame::pointer loadTrustLine(SecretKey const& k, Asset const& asset,
-                                  Application& app, bool mustExist = true);
+bool doesAccountExist(Application& app, PublicKey const& k);
 
 xdr::xvector<Signer, 20> getAccountSigners(PublicKey const& k,
                                            Application& app);
@@ -76,6 +104,8 @@ Operation inflation();
 Operation accountMerge(PublicKey const& dest);
 
 Operation manageData(std::string const& name, DataValue* value);
+
+Operation bumpSequence(SequenceNumber to);
 
 Operation createAccount(PublicKey const& dest, int64_t amount);
 
@@ -115,10 +145,17 @@ uint64_t applyCreatePassiveOffer(Application& app, SecretKey const& source,
                                  Price const& price, int64_t amount,
                                  SequenceNumber seq,
                                  ManageOfferEffect expectedEffect);
+Operation setOptions(SetOptionsArguments const& arguments);
 
-Operation setOptions(AccountID* inflationDest, uint32_t* setFlags,
-                     uint32_t* clearFlags, ThresholdSetter* thrs,
-                     Signer* signer, std::string* homeDomain);
+SetOptionsArguments setMasterWeight(int master);
+SetOptionsArguments setLowThreshold(int low);
+SetOptionsArguments setMedThreshold(int med);
+SetOptionsArguments setHighThreshold(int high);
+SetOptionsArguments setSigner(Signer signer);
+SetOptionsArguments setFlags(uint32_t setFlags);
+SetOptionsArguments clearFlags(uint32_t clearFlags);
+SetOptionsArguments setInflationDestination(AccountID inflationDest);
+SetOptionsArguments setHomeDomain(std::string const& homeDomain);
 
 Asset makeNativeAsset();
 Asset makeInvalidAsset();

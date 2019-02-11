@@ -9,7 +9,7 @@
 #include "invariant/Invariant.h"
 #include "invariant/InvariantDoesNotHold.h"
 #include "invariant/InvariantManagerImpl.h"
-#include "ledger/LedgerDelta.h"
+#include "ledger/LedgerState.h"
 #include "lib/util/format.h"
 #include "main/Application.h"
 #include "util/Logging.h"
@@ -20,6 +20,7 @@
 
 #include <memory>
 #include <numeric>
+#include <regex>
 
 namespace stellar
 {
@@ -27,7 +28,7 @@ namespace stellar
 std::unique_ptr<InvariantManager>
 InvariantManager::create(Application& app)
 {
-    return make_unique<InvariantManagerImpl>(app.getMetrics());
+    return std::make_unique<InvariantManagerImpl>(app.getMetrics());
 }
 
 InvariantManagerImpl::InvariantManagerImpl(medida::MetricsRegistry& registry)
@@ -36,7 +37,7 @@ InvariantManagerImpl::InvariantManagerImpl(medida::MetricsRegistry& registry)
 }
 
 Json::Value
-InvariantManagerImpl::getInformation()
+InvariantManagerImpl::getJsonInfo()
 {
     Json::Value failures;
     for (auto const& invariant : mInvariants)
@@ -54,6 +55,17 @@ InvariantManagerImpl::getInformation()
         }
     }
     return failures;
+}
+
+std::vector<std::string>
+InvariantManagerImpl::getEnabledInvariants() const
+{
+    std::vector<std::string> res;
+    for (auto const& p : mEnabled)
+    {
+        res.emplace_back(p->getName());
+    }
+    return res;
 }
 
 void
@@ -87,16 +99,17 @@ InvariantManagerImpl::checkOnBucketApply(std::shared_ptr<Bucket const> bucket,
 void
 InvariantManagerImpl::checkOnOperationApply(Operation const& operation,
                                             OperationResult const& opres,
-                                            LedgerDelta const& delta)
+                                            LedgerStateDelta const& lsDelta)
 {
-    if (delta.getHeader().ledgerVersion < 8)
+    if (lsDelta.header.current.ledgerVersion < 8)
     {
         return;
     }
 
     for (auto invariant : mEnabled)
     {
-        auto result = invariant->checkOnOperationApply(operation, opres, delta);
+        auto result =
+            invariant->checkOnOperationApply(operation, opres, lsDelta);
         if (result.empty())
         {
             continue;
@@ -105,7 +118,8 @@ InvariantManagerImpl::checkOnOperationApply(Operation const& operation,
         auto message = fmt::format(
             R"(Invariant "{}" does not hold on operation: {}{}{})",
             invariant->getName(), result, "\n", xdr::xdr_to_string(operation));
-        onInvariantFailure(invariant, message, delta.getHeader().ledgerSeq);
+        onInvariantFailure(invariant, message,
+                           lsDelta.header.current.ledgerSeq);
     }
 }
 
@@ -128,12 +142,48 @@ InvariantManagerImpl::registerInvariant(std::shared_ptr<Invariant> invariant)
 }
 
 void
-InvariantManagerImpl::enableInvariant(std::string const& name)
+InvariantManagerImpl::enableInvariant(std::string const& invPattern)
 {
-    auto registryIter = mInvariants.find(name);
-    if (registryIter == mInvariants.end())
+    if (invPattern.empty())
     {
-        std::string message = "Invariant " + name + " is not registered.";
+        throw std::invalid_argument("Invariant pattern must be non empty");
+    }
+
+    std::regex r;
+    try
+    {
+        r = std::regex(invPattern, std::regex::ECMAScript | std::regex::icase);
+    }
+    catch (std::regex_error& e)
+    {
+        throw std::invalid_argument(fmt::format(
+            "Invalid invariant pattern '{}': {}", invPattern, e.what()));
+    }
+
+    bool enabledSome = false;
+    for (auto const& inv : mInvariants)
+    {
+        auto const& name = inv.first;
+        if (std::regex_match(name, r, std::regex_constants::match_not_null))
+        {
+            auto iter = std::find(mEnabled.begin(), mEnabled.end(), inv.second);
+            if (iter == mEnabled.end())
+            {
+                enabledSome = true;
+                mEnabled.push_back(inv.second);
+                CLOG(INFO, "Invariant") << "Enabled invariant '" << name << "'";
+            }
+            else
+            {
+                throw std::runtime_error{"Invariant " + name +
+                                         " already enabled"};
+            }
+        }
+    }
+    if (!enabledSome)
+    {
+        std::string message = fmt::format(
+            "Invariant pattern '{}' did not match any invariants.", invPattern);
         if (mInvariants.size() > 0)
         {
             using value_type = decltype(mInvariants)::value_type;
@@ -150,18 +200,6 @@ InvariantManagerImpl::enableInvariant(std::string const& name)
             message += " There are no registered invariants";
         }
         throw std::runtime_error{message};
-    }
-
-    auto iter =
-        std::find(mEnabled.begin(), mEnabled.end(), registryIter->second);
-    if (iter == mEnabled.end())
-    {
-        mEnabled.push_back(registryIter->second);
-        CLOG(INFO, "Invariant") << "Enabled invariant '" << name << "'";
-    }
-    else
-    {
-        throw std::runtime_error{"Invariant " + name + " already enabled"};
     }
 }
 

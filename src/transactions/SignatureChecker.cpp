@@ -10,12 +10,10 @@
 #include "crypto/SignerKey.h"
 #include "transactions/SignatureUtils.h"
 #include "util/Algoritm.h"
+#include "util/XDROperators.h"
 
 namespace stellar
 {
-
-using xdr::operator<;
-using xdr::operator==;
 
 SignatureChecker::SignatureChecker(
     uint32_t protocolVersion, Hash const& contentsHash,
@@ -53,7 +51,12 @@ SignatureChecker::checkSignature(AccountID const& accountID,
         if (signerKey.key.preAuthTx() == mContentsHash)
         {
             mUsedOneTimeSignerKeys[accountID].insert(signerKey.key);
-            totalWeight += signerKey.weight;
+            auto w = signerKey.weight;
+            if (mProtocolVersion > 9 && w > UINT8_MAX)
+            {
+                w = UINT8_MAX;
+            }
+            totalWeight += w;
             if (totalWeight >= neededWeight)
                 return true;
         }
@@ -72,7 +75,12 @@ SignatureChecker::checkSignature(AccountID const& accountID,
                 if (verify(sig, signerKey))
                 {
                     mUsedSignatures[i] = true;
-                    totalWeight += signerKey.weight;
+                    auto w = signerKey.weight;
+                    if (mProtocolVersion > 9 && w > UINT8_MAX)
+                    {
+                        w = UINT8_MAX;
+                    }
+                    totalWeight += w;
                     if (totalWeight >= neededWeight)
                         return true;
 

@@ -1,9 +1,11 @@
 #include "main/dumpxdr.h"
 #include "crypto/SecretKey.h"
 #include "transactions/SignatureUtils.h"
+#include "util/Decoder.h"
 #include "util/Fs.h"
+#include "util/XDROperators.h"
 #include "util/XDRStream.h"
-#include "util/basen.h"
+#include "util/format.h"
 #include <iostream>
 #include <regex>
 #include <xdrpp/printer.h>
@@ -26,10 +28,10 @@ extern "C" {
 #define isatty _isatty
 #endif // MSVC
 
+using namespace std::placeholders;
+
 namespace stellar
 {
-
-const char* signtxn_network_id;
 
 std::string
 xdr_printer(const PublicKey& pk)
@@ -49,7 +51,7 @@ dumpstream(XDRInputFileStream& in)
 }
 
 void
-dumpxdr(std::string const& filename)
+dumpXdrStream(std::string const& filename)
 {
     std::regex rx(
         ".*(ledger|bucket|transactions|results|scp)-[[:xdigit:]]+\\.xdr");
@@ -110,25 +112,79 @@ readFile(const std::string& filename, bool base64 = false)
     }
     string ret;
     if (base64)
-        bn::decode_b64(input.str(), ret);
+        decoder::decode_b64(input.str(), ret);
     else
         ret = input.str();
     return {ret.begin(), ret.end()};
 }
 
+template <typename T>
 void
-printtxn(const std::string& filename, bool base64)
+printOneXdr(xdr::opaque_vec<> const& o, std::string const& desc)
 {
+    T tmp;
+    xdr::xdr_from_opaque(o, tmp);
+    std::cout << xdr::xdr_to_string(tmp, desc.c_str()) << std::endl;
+}
+
+void
+printXdr(std::string const& filename, std::string const& filetype, bool base64)
+{
+// need to use this pattern as there is no good way to get a human readable
+// type name from a type
+#define PRINTONEXDR(T) std::bind(printOneXdr<T>, _1, #T)
+    auto dumpMap =
+        std::map<std::string, std::function<void(xdr::opaque_vec<> const&)>>{
+            {"ledgerheader", PRINTONEXDR(LedgerHeader)},
+            {"meta", PRINTONEXDR(TransactionMeta)},
+            {"result", PRINTONEXDR(TransactionResult)},
+            {"resultpair", PRINTONEXDR(TransactionResultPair)},
+            {"tx", PRINTONEXDR(TransactionEnvelope)},
+            {"txfee", PRINTONEXDR(LedgerEntryChanges)}};
+#undef PRINTONEXDR
+
     try
     {
-        using xdr::operator<<;
-        TransactionEnvelope txenv;
-        xdr::xdr_from_opaque(readFile(filename, base64), txenv);
-        std::cout << txenv;
+        auto d = readFile(filename, base64);
+
+        if (filetype == "auto")
+        {
+            bool processed = false;
+            for (auto const& it : dumpMap)
+            {
+                try
+                {
+                    it.second(d);
+                    processed = true;
+                    break;
+                }
+                catch (xdr::xdr_runtime_error)
+                {
+                }
+            }
+            if (!processed)
+            {
+                throw std::invalid_argument("Could not detect type");
+            }
+        }
+        else
+        {
+            auto it = dumpMap.find(filetype);
+            if (it != dumpMap.end())
+            {
+                it->second(d);
+            }
+            else
+            {
+                throw std::invalid_argument(
+                    fmt::format("unknown filetype {}", filetype));
+            }
+        }
     }
     catch (const std::exception& e)
     {
-        std::cerr << e.what() << std::endl;
+        std::cerr << "Could not decode with type '" << filetype
+                  << "' : " << e.what() << std::endl;
     }
 }
 
@@ -216,15 +272,15 @@ readSecret(const std::string& prompt, bool force_tty)
 }
 
 void
-signtxn(std::string const& filename, bool base64)
+signtxn(std::string const& filename, std::string netId, bool base64)
 {
     using namespace std;
 
     try
     {
-        if (!signtxn_network_id)
-            signtxn_network_id = getenv("STELLAR_NETWORK_ID");
-        if (!signtxn_network_id)
+        if (netId.empty())
+            netId = getenv("STELLAR_NETWORK_ID");
+        if (netId.empty())
             throw std::runtime_error("missing --netid argument or "
                                      "STELLAR_NETWORK_ID environment variable");
 
@@ -243,7 +299,7 @@ signtxn(std::string const& filename, bool base64)
         SecretKey sk(SecretKey::fromStrKeySeed(
             readSecret("Secret key seed: ", txn_stdin)));
         TransactionSignaturePayload payload;
-        payload.networkId = sha256(std::string(signtxn_network_id));
+        payload.networkId = sha256(netId);
         payload.taggedTransaction.type(ENVELOPE_TYPE_TX);
         payload.taggedTransaction.tx() = txenv.tx;
         txenv.signatures.emplace_back(
@@ -252,7 +308,7 @@ signtxn(std::string const& filename, bool base64)
 
         auto out = xdr::xdr_to_opaque(txenv);
         if (base64)
-            cout << bn::encode_b64(out) << std::endl;
+            cout << decoder::encode_b64(out) << std::endl;
         else
             cout.write(reinterpret_cast<char*>(out.data()), out.size());
     }

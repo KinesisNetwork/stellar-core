@@ -257,36 +257,64 @@ VirtualClock::crank(bool block)
     {
         return 0;
     }
-    nRealTimerCancelEvents = 0;
+
     size_t nWorkDone = 0;
 
-    if (mMode == REAL_TIME)
     {
-        // Fire all pending timers.
-        nWorkDone += advanceToNow();
+        std::lock_guard<std::recursive_mutex> lock(mDelayExecutionMutex);
+        // Adding to mDelayedExecutionQueue is now restricted to main thread.
+
+        mDelayExecution = true;
+
+        nRealTimerCancelEvents = 0;
+
+        if (mMode == REAL_TIME)
+        {
+            // Fire all pending timers.
+            // May add work to mDelayedExecutionQueue
+            nWorkDone += advanceToNow();
+        }
+
+        // Pick up some work off the IO queue.
+        // Calling mIOService.poll() here may introduce unbounded delays
+        // to trigger timers.
+        const size_t WORK_BATCH_SIZE = 100;
+        size_t lastPoll;
+        size_t i = 0;
+        do
+        {
+            // May add work to mDelayedExecutionQueue.
+            lastPoll = mIOService.poll_one();
+            nWorkDone += lastPoll;
+        } while (lastPoll != 0 && ++i < WORK_BATCH_SIZE);
+
+        nWorkDone -= nRealTimerCancelEvents;
+
+        if (!mDelayedExecutionQueue.empty())
+        {
+            // If any work is added here, we don't want to advance VIRTUAL_TIME
+            // and also we don't need to block, as next crank will have
+            // something to execute.
+            nWorkDone++;
+            for (auto&& f : mDelayedExecutionQueue)
+            {
+                mIOService.post(std::move(f));
+            }
+            mDelayedExecutionQueue.clear();
+        }
+
+        if (mMode == VIRTUAL_TIME && nWorkDone == 0)
+        {
+            // If we did nothing and we're in virtual mode, we're idle and can
+            // skip time forward.
+            // May add work to mDelayedExecutionQueue for next crank.
+            nWorkDone += advanceToNext();
+        }
+
+        mDelayExecution = false;
     }
 
-    // pick up some work off the IO queue
-    // calling mIOService.poll() here may introduce unbounded delays
-    // to trigger timers
-    const size_t WORK_BATCH_SIZE = 10;
-    size_t lastPoll;
-    size_t i = 0;
-    do
-    {
-        lastPoll = mIOService.poll_one();
-        nWorkDone += lastPoll;
-    } while (lastPoll != 0 && ++i < WORK_BATCH_SIZE);
-
-    nWorkDone -= nRealTimerCancelEvents;
-
-    if (mMode == VIRTUAL_TIME && nWorkDone == 0)
-    {
-        // If we did nothing and we're in virtual mode,
-        // we're idle and can skip time forward.
-        nWorkDone += advanceToNext();
-    }
-
+    // At this point main and background threads can add work to next crank.
     if (block && nWorkDone == 0)
     {
         nWorkDone += mIOService.run_one();
@@ -295,6 +323,38 @@ VirtualClock::crank(bool block)
     noteCrankOccurred(nWorkDone == 0);
 
     return nWorkDone;
+}
+
+void
+VirtualClock::postToCurrentCrank(std::function<void()>&& f)
+{
+    mIOService.post(std::move(f));
+}
+
+void
+VirtualClock::postToNextCrank(std::function<void()>&& f)
+{
+    std::lock_guard<std::recursive_mutex> lock(mDelayExecutionMutex);
+
+    if (!mDelayExecution)
+    {
+        // Either we are waiting on io_service().run_one here, or by some
+        // chance run_one was woke up by network activity and postToNextCrank
+        // was called from background thread during of just after that (before
+        // mutex is again taken by crank). In first case we need to post
+        // directly to io_service to wake up run_one(). In second case this
+        // handler will be executed in poll_one(), a bit earlier that we want.
+        // But with current design it would be at most one additional job per
+        // crank.
+
+        // One immediate post is enough.
+        mDelayExecution = true;
+        mIOService.post(std::move(f));
+    }
+    else
+    {
+        mDelayedExecutionQueue.emplace_back(std::move(f));
+    }
 }
 
 void

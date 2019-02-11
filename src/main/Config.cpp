@@ -6,6 +6,7 @@
 #include "main/Config.h"
 #include "crypto/Hex.h"
 #include "crypto/KeyUtils.h"
+#include "herder/Herder.h"
 #include "history/HistoryArchive.h"
 #include "ledger/LedgerManager.h"
 #include "main/ExternalQueue.h"
@@ -13,17 +14,27 @@
 #include "scp/LocalNode.h"
 #include "util/Fs.h"
 #include "util/Logging.h"
+#include "util/XDROperators.h"
 #include "util/types.h"
 
 #include <functional>
 #include <lib/util/format.h>
 #include <sstream>
+#include <unordered_set>
 
 namespace stellar
 {
-using xdr::operator<;
+const uint32 Config::CURRENT_LEDGER_PROTOCOL_VERSION = 10;
 
-const uint32 Config::CURRENT_LEDGER_PROTOCOL_VERSION = 9;
+// Options that must only be used for testing
+static const std::unordered_set<std::string> TESTING_ONLY_OPTIONS = {
+    "RUN_STANDALONE", "MANUAL_CLOSE", "ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING",
+    "ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING",
+    "ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING"};
+
+// Options that should only be used for testing
+static const std::unordered_set<std::string> TESTING_SUGGESTED_OPTIONS = {
+    "ALLOW_LOCALHOST_FOR_TESTING"};
 
 Config::Config() : NODE_SEED(SecretKey::random())
 {
@@ -33,8 +44,8 @@ Config::Config() : NODE_SEED(SecretKey::random())
     FORCE_SCP = false;
     LEDGER_PROTOCOL_VERSION = CURRENT_LEDGER_PROTOCOL_VERSION;
 
-    OVERLAY_PROTOCOL_MIN_VERSION = 5;
-    OVERLAY_PROTOCOL_VERSION = 6;
+    OVERLAY_PROTOCOL_MIN_VERSION = 7;
+    OVERLAY_PROTOCOL_VERSION = 7;
 
     VERSION_STR = STELLAR_CORE_VERSION;
 
@@ -53,6 +64,7 @@ Config::Config() : NODE_SEED(SecretKey::random())
     USE_CONFIG_FOR_GENESIS = false;
     FAILURE_SAFETY = -1;
     UNSAFE_QUORUM = false;
+    DISABLE_BUCKET_GC = false;
 
     LOG_FILE_PATH = "stellar-core.%datetime{%Y.%M.%d-%H:%m:%s}.log";
     BUCKET_DIR_PATH = "buckets";
@@ -83,6 +95,9 @@ Config::Config() : NODE_SEED(SecretKey::random())
 
     DATABASE = SecretValue{"sqlite3://:memory:"};
     NTP_SERVER = "pool.ntp.org";
+
+    ENTRY_CACHE_SIZE = 4096;
+    BEST_OFFERS_CACHE_SIZE = 64;
 }
 
 namespace
@@ -231,6 +246,14 @@ Config::loadQset(std::shared_ptr<cpptoml::toml_group> group, SCPQuorumSet& qset,
 void
 Config::load(std::string const& filename)
 {
+    if (filename != "-" && !fs::exists(filename))
+    {
+        std::string s;
+        s = "No config file ";
+        s += filename + " found";
+        throw std::invalid_argument(s);
+    }
+
     LOG(DEBUG) << "Loading config from: " << filename;
     try
     {
@@ -249,6 +272,19 @@ Config::load(std::string const& filename)
         for (auto& item : g)
         {
             LOG(DEBUG) << "Config item: " << item.first;
+            if (TESTING_ONLY_OPTIONS.count(item.first) > 0)
+            {
+                LOG(INFO) << item.first
+                          << " enabled in configuration file - node will not "
+                             "function properly with most networks";
+            }
+            else if (TESTING_SUGGESTED_OPTIONS.count(item.first) > 0)
+            {
+                LOG(INFO) << item.first
+                          << " enabled in configuration file - node may not "
+                             "be configured for production use";
+            }
+
             if (item.first == "PEER_PORT")
             {
                 PEER_PORT = readInt<unsigned short>(item, 1, UINT16_MAX);
@@ -458,9 +494,8 @@ Config::load(std::string const& filename)
                                 throw std::invalid_argument(err);
                             }
                         }
-                        HISTORY[archive.first] =
-                            std::make_shared<HistoryArchive>(archive.first, get,
-                                                             put, mkdir);
+                        HISTORY[archive.first] = HistoryArchiveConfiguration{
+                            archive.first, get, put, mkdir};
                     }
                 }
                 else
@@ -483,6 +518,14 @@ Config::load(std::string const& filename)
             else if (item.first == "INVARIANT_CHECKS")
             {
                 INVARIANT_CHECKS = readStringArray(item);
+            }
+            else if (item.first == "ENTRY_CACHE_SIZE")
+            {
+                ENTRY_CACHE_SIZE = readInt<uint32_t>(item);
+            }
+            else if (item.first == "BEST_OFFERS_CACHE_SIZE")
+            {
+                BEST_OFFERS_CACHE_SIZE = readInt<uint32_t>(item);
             }
             else
             {
@@ -578,11 +621,14 @@ Config::validateConfig()
         auto topLevelCount =
             QUORUM_SET.validators.size() + QUORUM_SET.innerSets.size();
         FAILURE_SAFETY = (static_cast<uint32>(topLevelCount) - 1) / 3;
+
+        LOG(INFO) << "Assigning calculated value of " << FAILURE_SAFETY
+                  << " to FAILURE_SAFETY";
     }
 
     try
     {
-        if (FAILURE_SAFETY >= r.size())
+        if (FAILURE_SAFETY >= static_cast<int32_t>(r.size()))
         {
             LOG(ERROR) << "Not enough nodes / thresholds too strict in your "
                           "Quorum set to ensure your desired level of "
@@ -609,7 +655,7 @@ Config::validateConfig()
             if (QUORUM_SET.threshold < minSize)
             {
                 LOG(ERROR)
-                    << "Your THESHOLD_PERCENTAGE is too low. If you really "
+                    << "Your THRESHOLD_PERCENTAGE is too low. If you really "
                        "want "
                        "this set UNSAFE_QUORUM=true. Be sure you know what you "
                        "are doing!";
@@ -787,4 +833,27 @@ Config::expandNodeID(const std::string& s) const
         return {};
     }
 }
-} // namespace stellar
+
+std::chrono::seconds
+Config::getExpectedLedgerCloseTime() const
+{
+    if (ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING)
+    {
+        return std::chrono::seconds{ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING};
+    }
+    if (ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING)
+    {
+        return std::chrono::seconds{1};
+    }
+    return Herder::EXP_LEDGER_TIMESPAN_SECONDS;
+}
+
+void
+Config::setNoListen()
+{
+    // prevent opening up a port for other peers
+    RUN_STANDALONE = true;
+    HTTP_PORT = 0;
+    MANUAL_CLOSE = true;
+}
+}
