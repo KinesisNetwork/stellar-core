@@ -738,12 +738,12 @@ CommandHandler::upgrades(std::string const& params, std::string& retStr)
         uint32 maxTxSize;
         uint32 protocolVersion;
 
-        p.mBaseFee = maybeParseNumParam(retMap, "basefee", baseFee);
-        p.mBaseReserve = maybeParseNumParam(retMap, "basereserve", baseReserve);
+        p.mBaseFee = maybeParseParam(retMap, "basefee", baseFee);
+        p.mBaseReserve = maybeParseParam(retMap, "basereserve", baseReserve);
         p.mBasePercentageFee =
-            maybeParseNumParam(retMap, "basepercentagefee", basePercentageFee);
-        p.mMaxFee = maybeParseNumParam(retMap, "maxfee", maxFee);
-        p.mMaxTxSize = maybeParseNumParam(retMap, "maxtxsize", maxTxSize);
+            maybeParseParam(retMap, "basepercentagefee", basePercentageFee);
+        p.mMaxFee = maybeParseParam(retMap, "maxfee", maxFee);
+        p.mMaxTxSize = maybeParseParam(retMap, "maxtxsize", maxTxSize);
         p.mProtocolVersion =
             maybeParseParam(retMap, "protocolversion", protocolVersion);
 
