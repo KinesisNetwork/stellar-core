@@ -334,19 +334,12 @@ uint32_t
 LedgerManagerImpl::getTxPercentageFee() const
 {
     return mLastClosedLedger.header.basePercentageFee;
-
 }
 
 uint64_t
 LedgerManagerImpl::getMaxTxFee() const
 {
     return mLastClosedLedger.header.maxFee;
-}
-
-uint32_t
-LedgerManagerImpl::getMaxTxSetSize() const
-{
-    return mLastClosedLedger.header.maxTxSetSize;
 }
 
 int64_t

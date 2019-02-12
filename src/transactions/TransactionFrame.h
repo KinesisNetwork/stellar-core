@@ -151,6 +151,8 @@ class TransactionFrame
 
     int64_t getMinFee(LedgerStateHeader const& header) const;
 
+    double getFeeRatio(LedgerStateHeader const& header) const;
+
     void addSignature(SecretKey const& secretKey);
     void addSignature(DecoratedSignature const& signature);
 

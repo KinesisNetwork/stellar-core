@@ -105,9 +105,9 @@ TransactionFrame::getEnvelope()
 }
 
 double
-TransactionFrame::getFeeRatio(LedgerManager const& lm) const
+TransactionFrame::getFeeRatio(LedgerStateHeader const& header) const
 {
-    return ((double)getFee() / (double)getMinFee(lm));
+    return ((double)getFee() / (double)getMinFee(header));
 }
 
 int64_t
@@ -120,17 +120,18 @@ int64_t
 TransactionFrame::getMinFee(LedgerStateHeader const& header) const
 {
     size_t count = mOperations.size();
+    LedgerManager* lm;
 
     if (count == 0)
     {
         count = 1;
     }
 
-    auto baseFee = lm.getTxFee() * count;
+    auto baseFee = lm->getLastTxFee() * count;
 
     int64_t accumulatedFeeFromPercentage = 0;
     double percentageFeeAsDouble =
-        (double)lm.getTxPercentageFee() / (double)10000;
+        (double)lm->getTxPercentageFee() / (double)10000;
 
     for (auto& op : mOperations)
     {
@@ -287,6 +288,7 @@ TransactionFrame::commonValidPreSeqNum(Application& app,
 {
     // this function does validations that are independent of the account state
     //    (stay true regardless of other side effects)
+    LedgerManager* lm;
 
     if (mOperations.size() == 0)
     {
@@ -332,7 +334,7 @@ TransactionFrame::commonValidPreSeqNum(Application& app,
         return false;
     }
 
-    if (mEnvelope.tx.fee > lm.getMaxTxFee())
+    if (mEnvelope.tx.fee > lm->getMaxTxFee())
     {
         app.getMetrics()
             .NewMeter({"transaction", "invalid", "fee-over-max"}, "transaction")
@@ -341,8 +343,7 @@ TransactionFrame::commonValidPreSeqNum(Application& app,
         return false;
     }
 
-    if (!loadAccount(app.getLedgerManager().getCurrentLedgerVersion(), delta,
-                     app.getDatabase()))
+    if (!loadSourceAccount(ls, header))
     {
         app.getMetrics()
             .NewMeter({"transaction", "failure", "no-account"}, "transaction")

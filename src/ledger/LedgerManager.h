@@ -121,13 +121,9 @@ class LedgerManager
     virtual uint32_t getLastReserve() const = 0;
 
     // Return the fee required to apply a transaction to the current ledger.
-    virtual uint32_t getTxFee() const = 0;
+    virtual uint32_t getLastTxFee() const = 0;
     virtual uint32_t getTxPercentageFee() const = 0;
     virtual uint64_t getMaxTxFee() const = 0;
-    virtual uint32_t getLastTxFee() const = 0;
-    virtual int64_t getMinBalance(uint32_t ownerCount) const = 0;
-    virtual uint32_t getMaxTxSetSize() const = 0;
-    virtual uint64_t getCloseTime() const = 0;
 
     // return the maximum size of a transaction set to apply to the current
     // ledger

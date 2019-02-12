@@ -4,8 +4,6 @@
 
 #include "transactions/InflationOpFrame.h"
 #include "crypto/SHA.h"
-#include "ledger/AccountFrame.h"
-#include "ledger/LedgerDelta.h"
 #include "ledger/LedgerManager.h"
 #include "ledger/LedgerState.h"
 #include "ledger/LedgerStateEntry.h"
@@ -59,27 +57,8 @@ InflationOpFrame::doApply(Application& app, AbstractLedgerState& ls)
        inflation pool
     */
 
-    // int64_t totalVotes = lcl.totalCoins;
-    // int64_t minBalance =
-    //     bigDivide(totalVotes, INFLATION_WIN_MIN_PERCENT, TRILLION,
-    //     ROUND_DOWN);
-
-    // std::vector<AccountFrame::InflationVotes> winners;
-    auto& db = ledgerManager.getDatabase();
-
-    // AccountFrame::processForInflation(
-    //     [&](AccountFrame::InflationVotes const& votes) {
-    //         if (votes.mVotes >= minBalance)
-    //         {
-    //             winners.push_back(votes);
-    //             return true;
-    //         }
-    //         return false;
-    //     },
-    //     INFLATION_NUM_WINNERS, db);
-
     auto inflationAmount = 0;
-    auto amountToDole = inflationAmount + lcl.feePool;
+    auto amountToDole = inflationAmount + lh.feePool;
 
     lh.feePool = 0;
     lh.inflationSeq++;
@@ -95,53 +74,19 @@ InflationOpFrame::doApply(Application& app, AbstractLedgerState& ls)
     int64 toDoleThisWinner = amountToDole;
     int64 leftAfterDole = amountToDole;
 
-    AccountFrame::pointer winner;
-    winner = AccountFrame::loadAccount(inflationDelta, feeDestination, db);
+    auto winner = stellar::loadAccount(ls, feeDestination);
     if (winner)
     {
         leftAfterDole -= toDoleThisWinner;
-        /* if (ledgerManager.getCurrentLedgerVersion() <= 7) */
-        /* { */
-        /*     lcl.totalCoins += toDoleThisWinner; */
-        /* } */
-        if (!winner->addBalance(toDoleThisWinner))
+
+        if (!addBalance(header, winner, toDoleThisWinner))
         {
             throw std::runtime_error(
                 "inflation overflowed destination balance");
         }
-        winner->storeChange(inflationDelta, db);
+
         payouts.emplace_back(feeDestination, toDoleThisWinner);
     }
-
-    // for (auto const& w : winners)
-    // {
-    //     AccountFrame::pointer winner;
-
-    //     int64 toDoleThisWinner =
-    //         bigDivide(amountToDole, w.mVotes, totalVotes, ROUND_DOWN);
-
-    //     if (toDoleThisWinner == 0)
-    //         continue;
-
-    //     winner =
-    //         AccountFrame::loadAccount(inflationDelta, w.mInflationDest, db);
-
-    //     if (winner)
-    //     {
-    //         leftAfterDole -= toDoleThisWinner;
-    //         if (ledgerManager.getCurrentLedgerVersion() <= 7)
-    //         {
-    //             lcl.totalCoins += toDoleThisWinner;
-    //         }
-    //         if (!winner->addBalance(toDoleThisWinner))
-    //         {
-    //             throw std::runtime_error(
-    //                 "inflation overflowed destination balance");
-    //         }
-    //         winner->storeChange(inflationDelta, db);
-    //         payouts.emplace_back(w.mInflationDest, toDoleThisWinner);
-    //     }
-    // }
 
     // put back in fee pool as unclaimed funds
     lh.feePool += leftAfterDole;

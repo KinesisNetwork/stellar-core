@@ -1,8 +1,7 @@
-// Copyright 2014 Stellar Development Foundation and contributors. Licensed
-// under the Apache License, Version 2.0. See the COPYING file at the root
-// of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
+// // Copyright 2014 Stellar Development Foundation and contributors. Licensed
+// // under the Apache License, Version 2.0. See the COPYING file at the root
+// // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-#include "crypto/SHA.h"
 #include "herder/LedgerCloseData.h"
 #include "ledger/LedgerManager.h"
 #include "ledger/LedgerState.h"
@@ -359,94 +358,281 @@ TEST_CASE("inflation", "[tx][inflation]")
         REQUIRE(getFeePool() == 0);
         REQUIRE(getTotalCoins() == 1000000000000000000);
 
-        auto minBalance = app->getLedgerManager().getMinBalance(0);
-        auto rootBalance = root.getBalance();
-
         auto voter1 = TestAccount{*app, getAccount("voter1"), 0};
         auto voter2 = TestAccount{*app, getAccount("voter2"), 0};
+        auto target1 = TestAccount{*app, getAccount("target1"), 0};
+        auto target2 = TestAccount{*app, getAccount("target2"), 0};
 
-        Hash seed = sha256(app->getConfig().NETWORK_PASSPHRASE + "feepool");
-        SecretKey feeKey = SecretKey::fromSeed(seed);
-        AccountID targetKey = feeKey.getPublicKey();
+        auto minBalance = app->getLedgerManager().getLastMinBalance(0);
+        auto rootBalance = root.getBalance();
 
         auto voter1tx = root.tx({createAccount(voter1, rootBalance / 6)});
         voter1tx->getEnvelope().tx.fee = 999999999;
         auto voter2tx = root.tx({createAccount(voter2, rootBalance / 3)});
-        auto targettx = root.tx({createAccount(targetKey, minBalance)});
+        auto target1tx = root.tx({createAccount(target1, minBalance)});
+        auto target2tx = root.tx({createAccount(target2, minBalance)});
 
-        closeLedgerOn(*app, 2, 21, 7, 2014, {voter1tx, voter2tx, targettx});
+        closeLedgerOn(*app, 2, 21, 7, 2014,
+                      {voter1tx, voter2tx, target1tx, target2tx});
 
-        AccountFrame::pointer inflationTarget;
-        inflationTarget = loadAccount(targetKey, *app);
+        REQUIRE(getFeePool() == 1000000299);
+        REQUIRE(getTotalCoins() == 1000000000000000000);
 
-        clh = app->getLedgerManager().getCurrentLedgerHeader();
-        REQUIRE(clh.feePool == (999999999 + 2 * 100));
-        REQUIRE(clh.totalCoins == 1000000000000000000);
+        auto setInflationDestination1 = voter1.tx(
+            {setOptions(setInflationDestination(target1.getPublicKey()))});
+        auto setInflationDestination2 = voter2.tx(
+            {setOptions(setInflationDestination(target2.getPublicKey()))});
+
+        closeLedgerOn(*app, 3, 21, 7, 2014,
+                      {setInflationDestination1, setInflationDestination2});
+
+        REQUIRE(getFeePool() == 1000000499);
+        REQUIRE(getTotalCoins() == 1000000000000000000);
 
         auto beforeInflationRoot = root.getBalance();
         auto beforeInflationVoter1 = voter1.getBalance();
         auto beforeInflationVoter2 = voter2.getBalance();
-        auto beforeInflationTarget = inflationTarget->getBalance();
+        auto beforeInflationTarget1 = target1.getBalance();
+        auto beforeInflationTarget2 = target2.getBalance();
 
         REQUIRE(beforeInflationRoot + beforeInflationVoter1 +
-                    beforeInflationVoter2 + beforeInflationTarget +
-                    clh.feePool ==
-                clh.totalCoins);
+                    beforeInflationVoter2 + beforeInflationTarget1 +
+                    beforeInflationTarget2 + getFeePool() ==
+                getTotalCoins());
 
         auto inflationTx = root.tx({inflation()});
 
         for_versions_to(7, *app, [&] {
-            clh = app->getLedgerManager().getCurrentLedgerHeader();
-            REQUIRE(clh.feePool == (999999999 + 2 * 100));
-            closeLedgerOn(*app, 3, 21, 7, 2014, {inflationTx});
+            closeLedgerOn(*app, 4, 21, 7, 2014, {inflationTx});
 
-            clh = app->getLedgerManager().getCurrentLedgerHeader();
-            REQUIRE(clh.feePool == 0);
-            REQUIRE(clh.totalCoins == 1000000000000000000);
+            REQUIRE(getFeePool() == 95361000000301);
+            REQUIRE(getTotalCoins() == 1000095361000000298);
 
             auto afterInflationRoot = root.getBalance();
             auto afterInflationVoter1 = voter1.getBalance();
             auto afterInflationVoter2 = voter2.getBalance();
-            inflationTarget = loadAccount(targetKey, *app);
-            auto afterInflationTarget = inflationTarget->getBalance();
+            auto afterInflationTarget1 = target1.getBalance();
+            auto afterInflationTarget2 = target2.getBalance();
+            auto inflationError = 95359999999702;
 
             REQUIRE(beforeInflationRoot == afterInflationRoot + 100);
             REQUIRE(beforeInflationVoter1 == afterInflationVoter1);
             REQUIRE(beforeInflationVoter2 == afterInflationVoter2);
-            REQUIRE(beforeInflationTarget ==
-                    afterInflationTarget - (999999999 + 3 * 100));
+            REQUIRE(beforeInflationTarget1 ==
+                    afterInflationTarget1 - 31787000000099);
+            REQUIRE(beforeInflationTarget2 ==
+                    afterInflationTarget2 - 63574000000199);
 
             REQUIRE(afterInflationRoot + afterInflationVoter1 +
-                        afterInflationVoter2 + afterInflationTarget +
-                        clh.feePool ==
-                    clh.totalCoins);
+                        afterInflationVoter2 + afterInflationTarget1 +
+                        afterInflationTarget2 + getFeePool() ==
+                    getTotalCoins() + inflationError);
         });
 
         for_versions_from(8, *app, [&] {
-            clh = app->getLedgerManager().getCurrentLedgerHeader();
-            REQUIRE(clh.feePool == (999999999 + 2 * 100));
-            closeLedgerOn(*app, 3, 21, 7, 2014, {inflationTx});
+            closeLedgerOn(*app, 4, 21, 7, 2014, {inflationTx});
 
-            clh = app->getLedgerManager().getCurrentLedgerHeader();
-            REQUIRE(clh.feePool == 0);
-            REQUIRE(clh.totalCoins == 1000000000000000000);
+            REQUIRE(getFeePool() == 95361000000301);
+            REQUIRE(getTotalCoins() == 1000190721000000000);
 
             auto afterInflationRoot = root.getBalance();
             auto afterInflationVoter1 = voter1.getBalance();
             auto afterInflationVoter2 = voter2.getBalance();
-            inflationTarget = loadAccount(targetKey, *app);
-            auto afterInflationTarget = inflationTarget->getBalance();
+            auto afterInflationTarget1 = target1.getBalance();
+            auto afterInflationTarget2 = target2.getBalance();
 
             REQUIRE(beforeInflationRoot == afterInflationRoot + 100);
             REQUIRE(beforeInflationVoter1 == afterInflationVoter1);
             REQUIRE(beforeInflationVoter2 == afterInflationVoter2);
-            REQUIRE(beforeInflationTarget ==
-                    afterInflationTarget - (999999999 + 3 * 100));
+            REQUIRE(beforeInflationTarget1 ==
+                    afterInflationTarget1 - 31787000000099);
+            REQUIRE(beforeInflationTarget2 ==
+                    afterInflationTarget2 - 63574000000199);
 
             REQUIRE(afterInflationRoot + afterInflationVoter1 +
-                        afterInflationVoter2 + afterInflationTarget +
-                        clh.feePool ==
-                    clh.totalCoins);
+                        afterInflationVoter2 + afterInflationTarget1 +
+                        afterInflationTarget2 + getFeePool() ==
+                    getTotalCoins());
         });
+    }
+
+    // minVote to participate in inflation
+    const int64 minVote = 1000000000LL;
+    // .05% of all coins
+    const int64 winnerVote = bigDivide(getTotalCoins(), 5, 10000, ROUND_DOWN);
+
+    SECTION("inflation scenarios")
+    {
+        for_all_versions(*app, [&] {
+            std::function<int(int)> voteFunc;
+            std::function<int64(int)> balanceFunc;
+            int nbAccounts = 0;
+            int expectedWinners = 0;
+
+            auto verify = [&]() {
+                if (nbAccounts != 0)
+                {
+                    createTestAccounts(*app, nbAccounts, balanceFunc, voteFunc);
+                    closeLedgerOn(*app, 2, 21, 7, 2014);
+
+                    doInflation(*app, getLedgerVersion(), nbAccounts,
+                                balanceFunc, voteFunc, expectedWinners);
+                }
+            };
+
+            SECTION("two guys over threshold")
+            {
+                nbAccounts = 120;
+                expectedWinners = 2;
+                voteFunc = [&](int n) { return (n + 1) % nbAccounts; };
+                balanceFunc = [&](int n) {
+                    if (n == 0 || n == 5)
+                    {
+                        return winnerVote;
+                    }
+                    else
+                    {
+                        return minVote;
+                    }
+                };
+                verify();
+            }
+            SECTION("no one over min")
+            {
+                SECTION("less than max")
+                {
+                    nbAccounts = 12;
+                    expectedWinners = 0;
+                }
+                SECTION("more than max")
+                {
+                    nbAccounts = 2200;
+                    expectedWinners = 0;
+                }
+                voteFunc = [&](int n) { return (n + 1) % nbAccounts; };
+                balanceFunc = [&](int n) {
+                    int64 balance = (n + 1) * minVote;
+                    assert(balance < winnerVote);
+                    return balance;
+                };
+                verify();
+            }
+            SECTION("all to one destination")
+            {
+                nbAccounts = 12;
+                expectedWinners = 1;
+                voteFunc = [&](int n) { return 0; };
+                balanceFunc = [&](int n) {
+                    return 1 + (winnerVote / nbAccounts);
+                };
+                verify();
+            }
+            SECTION("50/50 split")
+            {
+                nbAccounts = 12;
+                expectedWinners = 2;
+                const int midPoint = nbAccounts / 2;
+
+                const int64 each =
+                    bigDivide(winnerVote, 2, nbAccounts, ROUND_DOWN) + minVote;
+
+                voteFunc = [&](int n) { return (n < midPoint) ? 0 : 1; };
+                balanceFunc = [&](int n) { return each; };
+                verify();
+            }
+            SECTION("no winner")
+            {
+                nbAccounts = 12;
+                expectedWinners = 0;
+                voteFunc = [&](int n) { return -1; };
+                balanceFunc = [&](int n) { return (n + 1) * minVote; };
+                verify();
+            }
+            SECTION("some winner does not exist")
+            {
+                nbAccounts = 13;
+                expectedWinners = 1;
+                const int midPoint = nbAccounts / 2;
+
+                const int64 each =
+                    bigDivide(winnerVote, 2, nbAccounts, ROUND_DOWN) + minVote;
+
+                voteFunc = [&](int n) { return (n < midPoint) ? 0 : 1; };
+                balanceFunc = [&](int n) {
+                    // account "0" does not exist
+                    return (n == 0) ? -1 : each;
+                };
+                verify();
+            }
+        });
+    }
+
+    SECTION("inflation with liabilities")
+    {
+        auto inflationWithLiabilities = [&](int64_t available,
+                                            int64_t expectedPayout) {
+            int64_t txfee = app->getLedgerManager().getLastTxFee();
+
+            auto balanceFunc = [&](int n) { return 1 + winnerVote / 2; };
+            auto voteFunc = [&](int n) { return 0; };
+            createTestAccounts(*app, 2, balanceFunc, voteFunc);
+            auto a0 = TestAccount(*app, getTestAccount(0));
+            auto native = makeNativeAsset();
+            auto cur1 = a0.asset("CUR1");
+            auto offerAmount = INT64_MAX - a0.getBalance() - available;
+
+            TestMarket market(*app);
+            auto offer = market.requireChangesWithOffer({}, [&] {
+                return market.addOffer(
+                    a0, {cur1, native, Price{1, 1}, offerAmount});
+            });
+            root.pay(a0, txfee);
+
+            closeLedgerOn(*app, 2, 21, 7, 2014);
+
+            int expectedWinners = (expectedPayout > 0);
+            doInflation(*app, getLedgerVersion(), 2, balanceFunc, voteFunc,
+                        expectedWinners);
+        };
+
+        int64_t maxPayout =
+            bigDivide(getTotalCoins(), 190721, 1000000000, ROUND_DOWN) +
+            getFeePool();
+
+        SECTION("no available balance")
+        {
+            for_versions_to(9, *app,
+                            [&] { inflationWithLiabilities(0, maxPayout); });
+            for_versions_from(10, *app,
+                              [&] { inflationWithLiabilities(0, 0); });
+        }
+
+        SECTION("small available balance less than payout")
+        {
+            for_versions_to(9, *app,
+                            [&] { inflationWithLiabilities(1, maxPayout); });
+            for_versions_from(10, *app,
+                              [&] { inflationWithLiabilities(1, 1); });
+        }
+
+        SECTION("large available balance less than payout")
+        {
+            for_versions_to(9, *app, [&] {
+                inflationWithLiabilities(maxPayout - 1, maxPayout);
+            });
+            for_versions_from(10, *app, [&] {
+                inflationWithLiabilities(maxPayout - 1, maxPayout - 1);
+            });
+        }
+
+        SECTION("available balance greater than payout")
+        {
+            for_versions_to(9, *app, [&] {
+                inflationWithLiabilities(maxPayout + 1, maxPayout);
+            });
+            for_versions_from(10, *app, [&] {
+                inflationWithLiabilities(maxPayout + 1, maxPayout);
+            });
+        }
     }
 }
