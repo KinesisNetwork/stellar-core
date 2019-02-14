@@ -14,7 +14,7 @@ RUN mkdir /overwrite-bin \
     && ln -s $(which g++-6) /overwrite-bin/g++ \
     && ln -s $(which clang-5.0) /overwrite-bin/clang \
     && ln -s $(which clang++-5.0) /overwrite-bin/clang++ \
-    && ln -s $(which llvm-symbolizer-3.5) /overwrite-bin/llvm-symbolizer \
+    && ln -s $(which llvm-symbolizer-5.0) /overwrite-bin/llvm-symbolizer \
     && ln -s $(which clang-format-5.0) /overwrite-bin/clang-format
 
 ENV PATH="/overwrite-bin:${PATH}" CXX="g++" CC="gcc"
