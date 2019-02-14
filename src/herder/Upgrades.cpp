@@ -157,12 +157,11 @@ Upgrades::applyTo(LedgerUpgrade const& upgrade, AbstractLedgerState& ls)
         applyReserveUpgrade(ls, upgrade.newBaseReserve());
         break;
     case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
-        ls.loadHeader().current().basePercentageFee = upgrade.newBasePercentageFee();
-        // header.basePercentageFee = upgrade.newBasePercentageFee();
+        ls.loadHeader().current().basePercentageFee =
+            upgrade.newBasePercentageFee();
         break;
     case LEDGER_UPGRADE_MAX_FEE:
         ls.loadHeader().current().maxFee = upgrade.newMaxFee();
-        // header.maxFee = upgrade.newMaxFee();
         break;
     default:
     {
