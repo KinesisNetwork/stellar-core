@@ -11,6 +11,7 @@
 #include "medida/medida.h"
 #include "overlay/OverlayManager.h"
 #include "util/Logging.h"
+#include "util/XDROperators.h"
 #include "xdrpp/marshal.h"
 
 namespace stellar
@@ -25,8 +26,6 @@ Tracker::Tracker(Application& app, Hash const& hash, AskPeer& askPeer)
     , mNumListRebuild(0)
     , mTimer(app)
     , mItemHash(hash)
-    , mTryNextPeerReset(app.getMetrics().NewMeter(
-          {"overlay", "item-fetcher", "reset-fetcher"}, "item-fetcher"))
     , mTryNextPeer(app.getMetrics().NewMeter(
           {"overlay", "item-fetcher", "next-peer"}, "item-fetcher"))
 {
@@ -126,7 +125,6 @@ Tracker::tryNextPeer()
         CLOG(TRACE, "Overlay")
             << "tryNextPeer " << hexAbbrev(mItemHash) << " attempt "
             << mNumListRebuild << " reset to #" << mPeersToAsk.size();
-        mTryNextPeerReset.Mark();
     }
 
     while (!peer && !mPeersToAsk.empty())
@@ -155,10 +153,13 @@ Tracker::tryNextPeer()
     }
     else
     {
+        if (mLastAskedPeer)
+        {
+            mTryNextPeer.Mark();
+        }
         mLastAskedPeer = peer;
         CLOG(TRACE, "Overlay") << "Asking for " << hexAbbrev(mItemHash)
                                << " to " << peer->toString();
-        mTryNextPeer.Mark();
         mAskPeer(peer, mItemHash);
         nextTry = MS_TO_WAIT_FOR_FETCH_REPLY;
     }
@@ -183,7 +184,6 @@ Tracker::listen(const SCPEnvelope& env)
 void
 Tracker::discard(const SCPEnvelope& env)
 {
-    using xdr::operator==;
     auto matchEnvelope = [&env](std::pair<Hash, SCPEnvelope> const& x) {
         return x.second == env;
     };

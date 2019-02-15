@@ -5,12 +5,18 @@
 #include "history/HistoryTestsUtils.h"
 #include "bucket/BucketManager.h"
 #include "crypto/Hex.h"
+#include "crypto/Random.h"
 #include "herder/TxSetFrame.h"
+#include "history/HistoryArchiveManager.h"
 #include "ledger/CheckpointRange.h"
+#include "ledger/LedgerState.h"
+#include "ledger/LedgerStateHeader.h"
+#include "lib/catch.hpp"
 #include "test/TestAccount.h"
 #include "test/TestUtils.h"
 #include "test/TxTests.h"
 #include "test/test.h"
+#include "util/XDROperators.h"
 #include "work/WorkManager.h"
 
 #include <medida/metrics_registry.h>
@@ -20,8 +26,6 @@ using namespace txtest;
 
 namespace stellar
 {
-using xdr::operator==;
-
 namespace historytestutils
 {
 
@@ -32,7 +36,8 @@ HistoryConfigurator::getArchiveDirName() const
 }
 
 TmpDirHistoryConfigurator::TmpDirHistoryConfigurator()
-    : mArchtmp("archtmp"), mDir(mArchtmp.tmpDir("archive"))
+    : mArchtmp("archtmp-" + binToHex(randomBytes(8)))
+    , mDir(mArchtmp.tmpDir("archive"))
 {
 }
 
@@ -57,7 +62,7 @@ TmpDirHistoryConfigurator::configure(Config& mCfg, bool writable) const
     }
 
     mCfg.HISTORY["test"] =
-        std::make_shared<HistoryArchive>("test", getCmd, putCmd, mkdirCmd);
+        HistoryArchiveConfiguration{"test", getCmd, putCmd, mkdirCmd};
     return mCfg;
 }
 
@@ -82,7 +87,7 @@ S3HistoryConfigurator::configure(Config& mCfg, bool writable) const
         putCmd = "aws s3 cp {0} " + s3b + "/{1}";
     }
     mCfg.HISTORY["test"] =
-        std::make_shared<HistoryArchive>("test", getCmd, putCmd, mkdirCmd);
+        HistoryArchiveConfiguration{"test", getCmd, putCmd, mkdirCmd};
     return mCfg;
 }
 
@@ -207,21 +212,11 @@ CatchupSimulation::CatchupSimulation(std::shared_ptr<HistoryConfigurator> cg)
           mClock, mHistoryConfigurator->configure(mCfg, true)))
     , mApp(*mAppPtr)
 {
-    CHECK(HistoryManager::initializeHistoryArchive(mApp, "test"));
+    CHECK(mApp.getHistoryArchiveManager().initializeHistoryArchive("test"));
 }
 
 CatchupSimulation::~CatchupSimulation()
 {
-}
-
-void
-CatchupSimulation::crankTillDone()
-{
-    while (!mApp.getWorkManager().allChildrenDone() &&
-           !mApp.getClock().getIOService().stopped())
-    {
-        mApp.getClock().crank(true);
-    }
 }
 
 void
@@ -231,9 +226,8 @@ CatchupSimulation::generateAndPublishInitialHistory(size_t nPublishes)
 
     auto& lm = mApp.getLedgerManager();
 
-    // At this point LCL should be 1, current ledger should be 2
-    REQUIRE(lm.getLastClosedLedgerHeader().header.ledgerSeq == 1);
-    REQUIRE(lm.getCurrentLedgerHeader().ledgerSeq == 2);
+    // At this point LCL should be 1
+    REQUIRE(lm.getLastClosedLedgerNum() == 1);
 
     generateAndPublishHistory(nPublishes);
 }
@@ -245,8 +239,8 @@ CatchupSimulation::generateRandomLedger()
     TxSetFramePtr txSet =
         std::make_shared<TxSetFrame>(lm.getLastClosedLedgerHeader().hash);
 
-    uint32_t ledgerSeq = lm.getLedgerNum();
-    uint64_t minBalance = lm.getMinBalance(5);
+    uint32_t ledgerSeq = lm.getLastClosedLedgerNum() + 1;
+    uint64_t minBalance = lm.getLastMinBalance(5);
     uint64_t big = minBalance + ledgerSeq;
     uint64_t small = 100 + ledgerSeq;
     uint64_t closeTime = 60 * 5 * ledgerSeq;
@@ -294,7 +288,7 @@ CatchupSimulation::generateRandomLedger()
     mLedgerCloseDatas.emplace_back(ledgerSeq, txSet, sv);
     lm.closeLedger(mLedgerCloseDatas.back());
 
-    mLedgerSeqs.push_back(lm.getLastClosedLedgerHeader().header.ledgerSeq);
+    mLedgerSeqs.push_back(lm.getLastClosedLedgerNum());
     mLedgerHashes.push_back(lm.getLastClosedLedgerHeader().hash);
     mBucketListHashes.push_back(
         lm.getLastClosedLedgerHeader().header.bucketListHash);
@@ -327,7 +321,7 @@ CatchupSimulation::generateAndPublishHistory(size_t nPublishes)
     auto& hm = mApp.getHistoryManager();
 
     size_t publishSuccesses = hm.getPublishSuccessCount();
-    SequenceNumber ledgerSeq = lm.getCurrentLedgerHeader().ledgerSeq;
+    SequenceNumber ledgerSeq = lm.getLastClosedLedgerNum() + 1;
 
     while (hm.getPublishSuccessCount() < (publishSuccesses + nPublishes))
     {
@@ -338,7 +332,16 @@ CatchupSimulation::generateAndPublishHistory(size_t nPublishes)
             ++ledgerSeq;
         }
 
-        REQUIRE(lm.getCurrentLedgerHeader().ledgerSeq == ledgerSeq);
+        mBucketListAtLastPublish = getApp().getBucketManager().getBucketList();
+
+        // One more ledger is needed to close as stellar-core only publishes
+        // to just-before-LCL
+        generateRandomLedger();
+        ++ledgerSeq;
+        // One more for trigger ledger
+        generateRandomLedger();
+        REQUIRE(mApp.getLedgerManager().getLastClosedLedgerNum() == ledgerSeq);
+        ++ledgerSeq;
 
         // Advance until we've published (or failed to!)
         while (hm.getPublishSuccessCount() < hm.getPublishQueueCount())
@@ -350,8 +353,9 @@ CatchupSimulation::generateAndPublishHistory(size_t nPublishes)
 
     REQUIRE(hm.getPublishFailureCount() == 0);
     REQUIRE(hm.getPublishSuccessCount() == publishSuccesses + nPublishes);
-    REQUIRE(lm.getLedgerNum() ==
-            ((publishSuccesses + nPublishes) * hm.getCheckpointFrequency()));
+    REQUIRE(mApp.getLedgerManager().getLastClosedLedgerNum() ==
+            ((publishSuccesses + nPublishes) * hm.getCheckpointFrequency()) +
+                1);
 }
 
 Application::pointer
@@ -377,8 +381,26 @@ CatchupSimulation::catchupNewApplication(uint32_t initLedger, uint32_t count,
         mClock, mHistoryConfigurator->configure(mCfgs.back(), false));
 
     app2->start();
-    CHECK(catchupApplication(initLedger, count, manual, app2) == true);
+    REQUIRE(catchupApplication(initLedger, count, manual, app2));
     return app2;
+}
+
+void
+CatchupSimulation::crankUntil(Application::pointer app,
+                              std::function<bool()> const& predicate,
+                              VirtualClock::duration timeout)
+{
+    auto start = std::chrono::system_clock::now();
+    while (!app->getWorkManager().allChildrenDone() || !predicate())
+    {
+        app->getClock().crank(false);
+        auto current = std::chrono::system_clock::now();
+        auto diff = current - start;
+        if (diff > timeout)
+        {
+            break;
+        }
+    }
 }
 
 bool
@@ -412,7 +434,7 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
         CLOG(INFO, "History")
             << "force-starting catchup at initLedger=" << initLedger;
 
-        lm.startCatchUp({initLedger, count}, manual);
+        lm.startCatchup({initLedger, count}, manual);
     }
 
     // Push publishing side forward one-ledger into a history block if it's
@@ -420,11 +442,11 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
     // externalizable to knit-up with on the catchup side.
     if (mApp.getHistoryManager().nextCheckpointLedger(
             mApp.getLedgerManager().getLastClosedLedgerNum()) ==
-        mApp.getLedgerManager().getLedgerNum())
+        mApp.getLedgerManager().getLastClosedLedgerNum() + 1)
     {
         CLOG(INFO, "History")
             << "force-publishing first ledger in next history block, ledger="
-            << mApp.getLedgerManager().getLedgerNum();
+            << mApp.getLedgerManager().getLastClosedLedgerNum() + 1;
         generateRandomLedger();
     }
 
@@ -434,9 +456,9 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
     // externalize anything we haven't yet published, of course.
     if (!manual)
     {
-        uint32_t nextBlockStart =
-            mApp.getHistoryManager().nextCheckpointLedger(initLedger);
-        for (uint32_t n = initLedger + 1; n <= nextBlockStart; ++n)
+        uint32_t triggerLedger =
+            mApp.getHistoryManager().nextCheckpointLedger(initLedger) + 1;
+        for (uint32_t n = initLedger + 1; n <= triggerLedger; ++n)
         {
             // Remember the vectors count from 2, not 0.
             if (n - 2 >= mLedgerCloseDatas.size())
@@ -465,16 +487,39 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
     auto catchupConfiguration = CatchupConfiguration(initLedger, count);
 
     REQUIRE(!app2->getClock().getIOService().stopped());
+    crankUntil(
+        app2,
+        [&]() {
+            return app2->getLedgerManager().getState() ==
+                       LedgerManager::LM_CATCHING_UP_STATE &&
+                   app2->getLedgerManager().getCatchupState() ==
+                       LedgerManager::CatchupState::WAITING_FOR_CLOSING_LEDGER;
+        },
+        std::chrono::seconds{30});
+    auto nextLedger = lm.getLastClosedLedgerNum() + 1;
 
-    while (!app2->getWorkManager().allChildrenDone())
-    {
-        app2->getClock().crank(false);
-    }
+    CLOG(INFO, "History") << "Catching up finished: lastLedger = "
+                          << lastLedger;
+    CLOG(INFO, "History") << "Catching up finished: initLedger = "
+                          << initLedger;
+    CLOG(INFO, "History") << "Catching up finished: nextLedger = "
+                          << nextLedger;
+    CLOG(INFO, "History") << "Catching up finished: published range is "
+                          << mLedgerSeqs.size() << " ledgers, covering "
+                          << "[" << mLedgerSeqs.front() << ", "
+                          << mLedgerSeqs.back() << "]";
 
-    if (app2->getLedgerManager().getState() != LedgerManager::LM_SYNCED_STATE)
+    if (app2->getLedgerManager().getState() !=
+            LedgerManager::LM_CATCHING_UP_STATE ||
+        app2->getLedgerManager().getCatchupState() !=
+            LedgerManager::CatchupState::WAITING_FOR_CLOSING_LEDGER)
     {
+        CLOG(INFO, "History") << "Catching up failed: state = "
+                              << app2->getLedgerManager().getState();
         return false;
     }
+
+    CLOG(INFO, "History") << "Caught up";
 
     auto endCatchupMetrics = getCatchupMetrics(app2);
     auto catchupPerformedWork =
@@ -483,16 +528,6 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
     REQUIRE(catchupPerformedWork ==
             computeCatchupPerformedWork(lastLedger, catchupConfiguration,
                                         app2->getHistoryManager()));
-
-    uint32_t nextLedger = lm.getLedgerNum();
-
-    CLOG(INFO, "History") << "Caught up: lastLedger = " << lastLedger;
-    CLOG(INFO, "History") << "Caught up: initLedger = " << initLedger;
-    CLOG(INFO, "History") << "Caught up: nextLedger = " << nextLedger;
-    CLOG(INFO, "History") << "Caught up: published range is "
-                          << mLedgerSeqs.size() << " ledgers, covering "
-                          << "[" << mLedgerSeqs.front() << ", "
-                          << mLedgerSeqs.back() << "]";
 
     // Assuming we caught up to nextLedger 128 (say), LCL will be 127, so we
     // must subtract 1.
@@ -514,7 +549,7 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
         auto wantBucket0Hash = mBucket0Hashes.at(i);
         auto wantBucket1Hash = mBucket1Hashes.at(i);
 
-        auto haveSeq = lm.getLastClosedLedgerHeader().header.ledgerSeq;
+        auto haveSeq = lm.getLastClosedLedgerNum();
         auto haveHash = lm.getLastClosedLedgerHeader().hash;
         auto haveBucketListHash =
             lm.getLastClosedLedgerHeader().header.bucketListHash;
@@ -594,8 +629,6 @@ CatchupSimulation::catchupApplication(uint32_t initLedger, uint32_t count,
         CHECK(haveBobSeq == wantBobSeq);
         CHECK(haveCarolSeq == wantCarolSeq);
     }
-
-    mApp.getLedgerManager().checkDbState();
     return true;
 }
 
@@ -606,13 +639,10 @@ CatchupSimulation::getCatchupMetrics(Application::pointer app)
         {"history", "download-history-archive-state", "success"}, "event");
     auto historyArchiveStatesDownloaded = getHistoryArchiveStateSuccess.count();
 
-    auto& downloadLedgersCached = app->getMetrics().NewMeter(
-        {"history", "download-ledger", "cached"}, "event");
     auto& downloadLedgersSuccess = app->getMetrics().NewMeter(
         {"history", "download-ledger", "success"}, "event");
 
-    auto ledgersDownloaded =
-        downloadLedgersSuccess.count() + downloadLedgersCached.count();
+    auto ledgersDownloaded = downloadLedgersSuccess.count();
 
     auto& verifyLedgerSuccess = app->getMetrics().NewMeter(
         {"history", "verify-ledger", "success"}, "event");
@@ -632,16 +662,13 @@ CatchupSimulation::getCatchupMetrics(Application::pointer app)
 
     auto bucketsApplied = bucketApplySuccess.count();
 
-    auto& downloadTransactionsCached = app->getMetrics().NewMeter(
-        {"history", "download-transactions", " cached "}, "event");
     auto& downloadTransactionsSuccess = app->getMetrics().NewMeter(
         {"history", "download-transactions", "success"}, "event");
 
-    auto transactionsDownloaded = downloadTransactionsSuccess.count() +
-                                  downloadTransactionsCached.count();
+    auto transactionsDownloaded = downloadTransactionsSuccess.count();
 
     auto& applyLedgerSuccess = app->getMetrics().NewMeter(
-        {"history", "apply-ledger", "success"}, "event");
+        {"history", "apply-ledger-chain", "success"}, "event");
 
     auto transactionsApplied = applyLedgerSuccess.count();
 

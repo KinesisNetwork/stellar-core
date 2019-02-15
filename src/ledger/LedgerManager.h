@@ -11,7 +11,6 @@
 namespace stellar
 {
 
-class LedgerHeaderFrame;
 class LedgerCloseData;
 class Database;
 
@@ -45,6 +44,7 @@ class LedgerManager
     static const uint32_t GENESIS_LEDGER_BASE_RESERVE;
     static const uint32_t GENESIS_LEDGER_MAX_TX_SIZE;
     static const uint32_t GENESIS_LEDGER_PERCENTAGE_FEE;
+    static const uint64_t GENESIS_LEDGER_MAX_FEE;
     static const int64_t GENESIS_LEDGER_TOTAL_COINS;
 
     enum State
@@ -63,8 +63,18 @@ class LedgerManager
         LM_NUM_STATE
     };
 
-    virtual void setState(State s) = 0;
+    enum class CatchupState
+    {
+        NONE,
+        WAITING_FOR_TRIGGER_LEDGER,
+        APPLYING_HISTORY,
+        APPLYING_BUFFERED_LEDGERS,
+        WAITING_FOR_CLOSING_LEDGER
+    };
+
+    virtual void bootstrap() = 0;
     virtual State getState() const = 0;
+    virtual CatchupState getCatchupState() const = 0;
     virtual std::string getStateHuman() const = 0;
 
     bool
@@ -75,9 +85,9 @@ class LedgerManager
 
     // Logging helpers, return strings describing the provided ledgers.
     static std::string ledgerAbbrev(uint32_t seq, uint256 const& hash);
+    static std::string ledgerAbbrev(LedgerHeader const& header);
     static std::string ledgerAbbrev(LedgerHeader const& header,
                                     uint256 const& hash);
-    static std::string ledgerAbbrev(std::shared_ptr<LedgerHeaderFrame> p);
     static std::string ledgerAbbrev(LedgerHeaderHistoryEntry he);
 
     // Factory
@@ -92,18 +102,13 @@ class LedgerManager
     // `ledgerData`.
     virtual void valueExternalized(LedgerCloseData const& ledgerData) = 0;
 
-    // Return the current ledger header.
-    virtual LedgerHeader const& getCurrentLedgerHeader() const = 0;
-
-    // Return the current ledger version.
-    virtual uint32_t getCurrentLedgerVersion() const = 0;
-
     // Return the LCL header and (complete, immutable) hash.
     virtual LedgerHeaderHistoryEntry const&
     getLastClosedLedgerHeader() const = 0;
 
-    // Return the sequence number of the current ledger.
-    virtual uint32_t getLedgerNum() const = 0;
+    // return the HAS that corresponds to the last closed ledger as persisted in
+    // the database
+    virtual HistoryArchiveState getLastClosedLedgerHAS() = 0;
 
     // Return the sequence number of the LCL.
     virtual uint32_t getLastClosedLedgerNum() const = 0;
@@ -111,19 +116,18 @@ class LedgerManager
     // Return the minimum balance required to establish, in the current ledger,
     // a new ledger entry with `ownerCount` owned objects.  Derived from the
     // current ledger's `baseReserve` value.
-    virtual int64_t getMinBalance(uint32_t ownerCount) const = 0;
+    virtual int64_t getLastMinBalance(uint32_t ownerCount) const = 0;
 
-    // Return the close time of the current ledger, in seconds since the POSIX
-    // epoch.
-    virtual uint64_t getCloseTime() const = 0;
+    virtual uint32_t getLastReserve() const = 0;
 
     // Return the fee required to apply a transaction to the current ledger.
-    virtual uint32_t getTxFee() const = 0;
+    virtual uint32_t getLastTxFee() const = 0;
     virtual uint32_t getTxPercentageFee() const = 0;
+    virtual uint64_t getMaxTxFee() const = 0;
 
     // return the maximum size of a transaction set to apply to the current
     // ledger
-    virtual uint32_t getMaxTxSetSize() const = 0;
+    virtual uint32_t getLastMaxTxSetSize() const = 0;
 
     // Return the (changing) number of seconds since the LCL closed.
     virtual uint64_t secondsSinceLastLedgerClose() const = 0;
@@ -131,10 +135,6 @@ class LedgerManager
     // Ensure any metrics that are "current state" gauge-like counters reflect
     // the current reality as best as possible.
     virtual void syncMetrics() = 0;
-
-    // Return a mutable reference to the current ledger header; this is used
-    // solely by LedgerDelta to _modify_ the current ledger-in-progress.
-    virtual LedgerHeader& getCurrentLedgerHeader() = 0;
 
     virtual Database& getDatabase() = 0;
 
@@ -152,7 +152,7 @@ class LedgerManager
     // LedgerManager detects it is desynchronized from SCP's consensus ledger.
     // This method is present in the public interface to permit testing and
     // command line catchups.
-    virtual void startCatchUp(CatchupConfiguration configuration,
+    virtual void startCatchup(CatchupConfiguration configuration,
                               bool manualCatchup) = 0;
 
     // Called by the history subsystem during catchup: this method asks the
@@ -186,11 +186,8 @@ class LedgerManager
     virtual void deleteOldEntries(Database& db, uint32_t ledgerSeq,
                                   uint32_t count) = 0;
 
-    // checks the database for inconsistencies between objects
-    virtual void checkDbState() = 0;
-
     virtual ~LedgerManager()
     {
     }
 };
-}
+} // namespace stellar

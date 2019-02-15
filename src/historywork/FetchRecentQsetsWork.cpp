@@ -10,17 +10,13 @@
 #include "main/Application.h"
 #include "util/TmpDir.h"
 #include "util/XDRStream.h"
-#include "util/make_unique.h"
 
 namespace stellar
 {
 
 FetchRecentQsetsWork::FetchRecentQsetsWork(Application& app, WorkParent& parent,
-                                           InferredQuorum& inferredQuorum,
-                                           handler endHandler)
-    : Work(app, parent, "fetch-recent-qsets")
-    , mEndHandler(endHandler)
-    , mInferredQuorum(inferredQuorum)
+                                           InferredQuorum& inferredQuorum)
+    : Work(app, parent, "fetch-recent-qsets"), mInferredQuorum(inferredQuorum)
 {
 }
 
@@ -34,15 +30,8 @@ FetchRecentQsetsWork::onReset()
 {
     clearChildren();
     mDownloadSCPMessagesWork.reset();
-    mDownloadDir =
-        make_unique<TmpDir>(mApp.getTmpDirManager().tmpDir(getUniqueName()));
-}
-
-void
-FetchRecentQsetsWork::onFailureRaise()
-{
-    asio::error_code ec = std::make_error_code(std::errc::timed_out);
-    mEndHandler(ec);
+    mDownloadDir = std::make_unique<TmpDir>(
+        mApp.getTmpDirManager().tmpDir(getUniqueName()));
 }
 
 Work::State
@@ -52,8 +41,7 @@ FetchRecentQsetsWork::onSuccess()
     if (!mGetHistoryArchiveStateWork)
     {
         mGetHistoryArchiveStateWork = addWork<GetHistoryArchiveStateWork>(
-            "get-history-archive-state", mRemoteState, 0,
-            std::chrono::seconds(0));
+            "get-history-archive-state", mRemoteState, 0);
         return WORK_PENDING;
     }
 
@@ -90,8 +78,6 @@ FetchRecentQsetsWork::onSuccess()
         }
     }
 
-    asio::error_code ec;
-    mEndHandler(ec);
     return WORK_SUCCESS;
 }
 }

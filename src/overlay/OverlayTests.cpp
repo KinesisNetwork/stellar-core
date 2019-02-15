@@ -17,7 +17,6 @@
 #include "test/test.h"
 #include "util/Logging.h"
 #include "util/Timer.h"
-#include "util/make_unique.h"
 
 #include "medida/meter.h"
 #include "medida/metrics_registry.h"
@@ -27,7 +26,7 @@
 
 using namespace stellar;
 
-TEST_CASE("loopback peer hello", "[overlay]")
+TEST_CASE("loopback peer hello", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -42,7 +41,7 @@ TEST_CASE("loopback peer hello", "[overlay]")
     REQUIRE(conn.getAcceptor()->isAuthenticated());
 }
 
-TEST_CASE("loopback peer with 0 port", "[overlay]")
+TEST_CASE("loopback peer with 0 port", "[overlay][connections]")
 {
     VirtualClock clock;
     auto const& cfg1 = getTestConfig(0);
@@ -59,7 +58,7 @@ TEST_CASE("loopback peer with 0 port", "[overlay]")
     REQUIRE(!conn.getAcceptor()->isAuthenticated());
 }
 
-TEST_CASE("loopback peer send auth before hello", "[overlay]")
+TEST_CASE("loopback peer send auth before hello", "[overlay][connections]")
 {
     VirtualClock clock;
     auto const& cfg1 = getTestConfig(0);
@@ -75,7 +74,7 @@ TEST_CASE("loopback peer send auth before hello", "[overlay]")
     REQUIRE(!conn.getAcceptor()->isAuthenticated());
 }
 
-TEST_CASE("failed auth", "[overlay]")
+TEST_CASE("failed auth", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -89,12 +88,10 @@ TEST_CASE("failed auth", "[overlay]")
 
     REQUIRE(!conn.getInitiator()->isConnected());
     REQUIRE(!conn.getAcceptor()->isConnected());
-    REQUIRE(app1->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-message-mac"}, "drop")
-                .count() != 0);
+    REQUIRE(conn.getInitiator()->getDropReason() == "unexpected MAC");
 }
 
-TEST_CASE("reject non-preferred peer", "[overlay]")
+TEST_CASE("reject non preferred peer", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -110,12 +107,10 @@ TEST_CASE("reject non-preferred peer", "[overlay]")
 
     REQUIRE(!conn.getInitiator()->isConnected());
     REQUIRE(!conn.getAcceptor()->isConnected());
-    REQUIRE(app2->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-auth-reject"}, "drop")
-                .count() != 0);
+    REQUIRE(conn.getAcceptor()->getDropReason() == "peer rejected");
 }
 
-TEST_CASE("accept preferred peer even when strict", "[overlay]")
+TEST_CASE("accept preferred peer even when strict", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -135,7 +130,7 @@ TEST_CASE("accept preferred peer even when strict", "[overlay]")
     REQUIRE(conn.getAcceptor()->isAuthenticated());
 }
 
-TEST_CASE("reject peers beyond max", "[overlay]")
+TEST_CASE("reject peers beyond max", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -156,12 +151,10 @@ TEST_CASE("reject peers beyond max", "[overlay]")
     REQUIRE(conn1.getAcceptor()->isConnected());
     REQUIRE(!conn2.getInitiator()->isConnected());
     REQUIRE(!conn2.getAcceptor()->isConnected());
-    REQUIRE(app2->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-auth-reject"}, "drop")
-                .count() == 1);
+    REQUIRE(conn2.getAcceptor()->getDropReason() == "peer rejected");
 }
 
-TEST_CASE("allow pending peers beyond max", "[overlay]")
+TEST_CASE("allow pending peers beyond max", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -194,7 +187,7 @@ TEST_CASE("allow pending peers beyond max", "[overlay]")
                 .count() == 2);
 }
 
-TEST_CASE("reject pending beyond max", "[overlay]")
+TEST_CASE("reject pending beyond max", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -220,7 +213,8 @@ TEST_CASE("reject pending beyond max", "[overlay]")
                 .count() == 1);
 }
 
-TEST_CASE("reject peers with differing network passphrases", "[overlay]")
+TEST_CASE("reject peers with differing network passphrases",
+          "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -236,12 +230,9 @@ TEST_CASE("reject peers with differing network passphrases", "[overlay]")
 
     REQUIRE(!conn.getInitiator()->isConnected());
     REQUIRE(!conn.getAcceptor()->isConnected());
-    REQUIRE(app2->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-hello-cert"}, "drop")
-                .count() != 0);
 }
 
-TEST_CASE("reject peers with invalid cert", "[overlay]")
+TEST_CASE("reject peers with invalid cert", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -256,12 +247,9 @@ TEST_CASE("reject peers with invalid cert", "[overlay]")
 
     REQUIRE(!conn.getInitiator()->isConnected());
     REQUIRE(!conn.getAcceptor()->isConnected());
-    REQUIRE(app1->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-hello-cert"}, "drop")
-                .count() != 0);
 }
 
-TEST_CASE("reject banned peers", "[overlay]")
+TEST_CASE("reject banned peers", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -276,12 +264,10 @@ TEST_CASE("reject banned peers", "[overlay]")
 
     REQUIRE(!conn.getInitiator()->isConnected());
     REQUIRE(!conn.getAcceptor()->isConnected());
-    REQUIRE(app1->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-hello-ban"}, "drop")
-                .count() != 0);
 }
 
-TEST_CASE("reject peers with incompatible overlay versions", "[overlay]")
+TEST_CASE("reject peers with incompatible overlay versions",
+          "[overlay][connections]")
 {
     Config const& cfg1 = getTestConfig(0);
 
@@ -299,9 +285,8 @@ TEST_CASE("reject peers with incompatible overlay versions", "[overlay]")
 
         REQUIRE(!conn.getInitiator()->isConnected());
         REQUIRE(!conn.getAcceptor()->isConnected());
-        REQUIRE(app2->getMetrics()
-                    .NewMeter({"overlay", "drop", "recv-hello-version"}, "drop")
-                    .count() != 0);
+        REQUIRE(conn.getInitiator()->getDropReason() ==
+                "wrong protocol version");
     };
     SECTION("cfg2 above")
     {
@@ -313,7 +298,7 @@ TEST_CASE("reject peers with incompatible overlay versions", "[overlay]")
     }
 }
 
-TEST_CASE("reject peers who don't handshake quickly", "[overlay]")
+TEST_CASE("reject peers who dont handshake quickly", "[overlay][connections]")
 {
     auto test = [](unsigned short authenticationTimeout) {
         VirtualClock clock;
@@ -358,7 +343,7 @@ TEST_CASE("reject peers who don't handshake quickly", "[overlay]")
     }
 }
 
-TEST_CASE("reject peers with the same nodeid", "[overlay]")
+TEST_CASE("reject peers with the same nodeid", "[overlay][connections]")
 {
     VirtualClock clock;
     Config const& cfg1 = getTestConfig(0);
@@ -379,12 +364,11 @@ TEST_CASE("reject peers with the same nodeid", "[overlay]")
     REQUIRE(conn.getAcceptor()->isAuthenticated());
     REQUIRE(!conn2.getInitiator()->isConnected());
     REQUIRE(!conn2.getAcceptor()->isConnected());
-    REQUIRE(app2->getMetrics()
-                .NewMeter({"overlay", "drop", "recv-hello-peerid"}, "drop")
-                .count() != 0);
+    REQUIRE(conn2.getAcceptor()->getDropReason() ==
+            "connecting already-connected peer");
 }
 
-TEST_CASE("connecting to saturated nodes", "[overlay]")
+TEST_CASE("connecting to saturated nodes", "[overlay][connections]")
 {
     auto networkID = sha256(getTestConfig().NETWORK_PASSPHRASE);
     auto simulation =
@@ -427,7 +411,9 @@ TEST_CASE("connecting to saturated nodes", "[overlay]")
     qSet.validators.push_back(vNode2NodeID);
     qSet.validators.push_back(vNode3NodeID);
 
-    simulation->addNode(vHeadSecretKey, qSet, &headCfg);
+    auto headId = simulation->addNode(vHeadSecretKey, qSet, &headCfg)
+                      ->getConfig()
+                      .NODE_SEED.getPublicKey();
     simulation->addNode(vNode1SecretKey, qSet, &node1Cfg);
     simulation->addNode(vNode2SecretKey, qSet, &node2Cfg);
     simulation->addNode(vNode3SecretKey, qSet, &node3Cfg);
@@ -437,13 +423,16 @@ TEST_CASE("connecting to saturated nodes", "[overlay]")
     simulation->addPendingConnection(vNode3NodeID, vHeadNodeID);
 
     simulation->startAllNodes();
-    simulation->crankForAtLeast(std::chrono::seconds{30}, false);
+    simulation->crankForAtLeast(std::chrono::seconds{15}, false);
+    simulation->removeNode(headId);
+    simulation->crankForAtLeast(std::chrono::seconds{15}, false);
+
     // all three (two-way) connections are made
     REQUIRE(numberOfSimulationConnections() == 6);
     simulation->crankForAtLeast(std::chrono::seconds{1}, true);
 }
 
-TEST_CASE("preferred peers always connect", "[overlay]")
+TEST_CASE("preferred peers always connect", "[overlay][connections]")
 {
     auto networkID = sha256(getTestConfig().NETWORK_PASSPHRASE);
     auto simulation =

@@ -5,7 +5,9 @@
 #include "TCPPeer.h"
 #include "herder/Herder.h"
 #include "herder/HerderImpl.h"
-#include "ledger/LedgerDelta.h"
+#include "ledger/LedgerManager.h"
+#include "ledger/LedgerState.h"
+#include "ledger/LedgerStateEntry.h"
 #include "lib/catch.hpp"
 #include "main/Application.h"
 #include "main/Config.h"
@@ -18,6 +20,7 @@
 #include "test/test.h"
 #include "util/Logging.h"
 #include "util/Timer.h"
+#include "xdrpp/marshal.h"
 
 namespace stellar
 {
@@ -29,12 +32,13 @@ TEST_CASE("Flooding", "[flood][overlay]")
     Simulation::pointer simulation;
 
     // make closing very slow
-    auto cfgGen = []() {
-        static int cfgNum = 1;
-        Config cfg = getTestConfig(cfgNum++);
+    auto cfgGen = [](int cfgNum) {
+        Config cfg = getTestConfig(cfgNum);
         cfg.ARTIFICIALLY_SET_CLOSE_TIME_FOR_TESTING = 10000;
         return cfg;
     };
+
+    const int nbTx = 100;
 
     std::vector<TestAccount> sources;
     SequenceNumber expectedSeq = 0;
@@ -48,31 +52,29 @@ TEST_CASE("Flooding", "[flood][overlay]")
         nodes = simulation->getNodes();
         std::shared_ptr<Application> app0 = nodes[0];
 
-        const int nbTx = 100;
-
         auto root = TestAccount::createRoot(*app0);
-        auto rootA =
-            AccountFrame::loadAccount(root.getPublicKey(), app0->getDatabase());
 
         // directly create a bunch of accounts by cloning the root account (one
         // per tx so that we can easily identify them)
         {
-            LedgerEntry gen(rootA->mEntry);
-            auto& account = gen.data.account();
+            LedgerEntry gen;
+            {
+                LedgerState ls(app0->getLedgerStateRoot());
+                gen = stellar::loadAccount(ls, root.getPublicKey()).current();
+            }
+
             for (int i = 0; i < nbTx; i++)
             {
                 sources.emplace_back(
                     TestAccount{*app0, SecretKey::random(), 0});
-                account.accountID = sources.back();
-                auto newAccount = EntryFrame::FromXDR(gen);
+                gen.data.account().accountID = sources.back();
 
                 // need to create on all nodes
                 for (auto n : nodes)
                 {
-                    LedgerHeader lh;
-                    Database& db = n->getDatabase();
-                    LedgerDelta delta(lh, db, false);
-                    newAccount->storeAdd(delta, db);
+                    LedgerState ls(n->getLedgerStateRoot(), false);
+                    ls.create(gen);
+                    ls.commit();
                 }
             }
         }
@@ -145,7 +147,6 @@ TEST_CASE("Flooding", "[flood][overlay]")
             auto res = inApp->getHerder().recvTransaction(tx1);
             REQUIRE(res == Herder::TX_STATUS_PENDING);
             inApp->getOverlayManager().broadcastMessage(msg);
-
         };
 
         auto ackedTransactions = [&](std::shared_ptr<Application> app) {
@@ -205,6 +206,12 @@ TEST_CASE("Flooding", "[flood][overlay]")
         // a quorum set
         // a valid transaction set
 
+        std::vector<SecretKey> keys;
+        for (int i = 0; i < nbTx; i++)
+        {
+            keys.emplace_back(SecretKey::random());
+        }
+
         auto injectSCP = [&](int i) {
             const int64 txAmount = 10000000;
 
@@ -243,21 +250,20 @@ TEST_CASE("Flooding", "[flood][overlay]")
 
             auto& st = envelope.statement;
             st.slotIndex = lcl.header.ledgerSeq + 1;
-            st.pledges.type(SCP_ST_NOMINATE);
-            auto& nom = st.pledges.nominate();
-            nom.votes.emplace_back(xdr::xdr_to_opaque(sv));
-            nom.quorumSetHash = qSetHash;
+            st.pledges.type(SCP_ST_PREPARE);
+            auto& prep = st.pledges.prepare();
+            prep.ballot.value = xdr::xdr_to_opaque(sv);
+            prep.ballot.counter = 1;
+            prep.quorumSetHash = qSetHash;
 
             // use the sources to sign the message
-            st.nodeID = sources[i];
-            envelope.signature =
-                sources[i].getSecretKey().sign(xdr::xdr_to_opaque(
-                    inApp->getNetworkID(), ENVELOPE_TYPE_SCP, st));
+            st.nodeID = keys[i].getPublicKey();
+            envelope.signature = keys[i].sign(xdr::xdr_to_opaque(
+                inApp->getNetworkID(), ENVELOPE_TYPE_SCP, st));
 
             // inject the message
             REQUIRE(herder.recvSCPEnvelope(envelope, qset, txSet) ==
                     Herder::ENVELOPE_STATUS_READY);
-
         };
 
         auto ackedSCP = [&](std::shared_ptr<Application> app) {
@@ -269,7 +275,7 @@ TEST_CASE("Flooding", "[flood][overlay]")
             HerderImpl& herder = *static_cast<HerderImpl*>(&app->getHerder());
             auto state =
                 herder.getSCP().getCurrentState(lcl.header.ledgerSeq + 1);
-            for (auto const& s : sources)
+            for (auto const& s : keys)
             {
                 if (std::find_if(
                         state.begin(), state.end(), [&](SCPEnvelope const& e) {
@@ -287,18 +293,33 @@ TEST_CASE("Flooding", "[flood][overlay]")
             return res;
         };
 
+        auto quorumAdjuster = [&](SCPQuorumSet const& qSet) {
+            auto resQSet = qSet;
+            SCPQuorumSet sub;
+            for (auto const& k : keys)
+            {
+                sub.threshold++;
+                sub.validators.emplace_back(k.getPublicKey());
+            }
+            resQSet.threshold++;
+            resQSet.innerSets.emplace_back(sub);
+            return resQSet;
+        };
+
         SECTION("core")
         {
             SECTION("loopback")
             {
-                simulation = Topologies::core(
-                    4, .666f, Simulation::OVER_LOOPBACK, networkID, cfgGen);
+                simulation =
+                    Topologies::core(4, .666f, Simulation::OVER_LOOPBACK,
+                                     networkID, cfgGen, quorumAdjuster);
                 test(injectSCP, ackedSCP);
             }
             SECTION("tcp")
             {
-                simulation = Topologies::core(4, .666f, Simulation::OVER_TCP,
-                                              networkID, cfgGen);
+                simulation =
+                    Topologies::core(4, .666f, Simulation::OVER_TCP, networkID,
+                                     cfgGen, quorumAdjuster);
                 test(injectSCP, ackedSCP);
             }
         }
@@ -308,13 +329,15 @@ TEST_CASE("Flooding", "[flood][overlay]")
             SECTION("loopback")
             {
                 simulation = Topologies::hierarchicalQuorumSimplified(
-                    5, 10, Simulation::OVER_LOOPBACK, networkID, cfgGen);
+                    5, 10, Simulation::OVER_LOOPBACK, networkID, cfgGen, 1,
+                    quorumAdjuster);
                 test(injectSCP, ackedSCP);
             }
             SECTION("tcp")
             {
                 simulation = Topologies::hierarchicalQuorumSimplified(
-                    5, 10, Simulation::OVER_TCP, networkID, cfgGen);
+                    5, 10, Simulation::OVER_TCP, networkID, cfgGen, 1,
+                    quorumAdjuster);
                 test(injectSCP, ackedSCP);
             }
         }

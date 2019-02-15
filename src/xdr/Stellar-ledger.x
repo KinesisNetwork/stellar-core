@@ -56,6 +56,7 @@ struct LedgerHeader
 
     uint32 baseFee;     // base fee per operation in stroops
     uint32 basePercentageFee;     // base percentage fee per create account and payment operation, in basis points
+    uint64 maxFee; // maximum fee per transaction in stroops
     uint32 baseReserve; // account base reserve in stroops
 
     uint32 maxTxSetSize; // maximum size a transaction set can be
@@ -87,6 +88,7 @@ enum LedgerUpgradeType
     LEDGER_UPGRADE_MAX_TX_SET_SIZE = 3,
     LEDGER_UPGRADE_BASE_RESERVE = 4,
     LEDGER_UPGRADE_BASE_PERCENTAGE_FEE = 5,
+    LEDGER_UPGRADE_MAX_FEE = 6
 };
 
 union LedgerUpgrade switch (LedgerUpgradeType type)
@@ -101,6 +103,8 @@ case LEDGER_UPGRADE_BASE_RESERVE:
     uint32 newBaseReserve; // update baseReserve
 case LEDGER_UPGRADE_BASE_PERCENTAGE_FEE:
     uint32 newBasePercentageFee; // update basePercentageFee
+case LEDGER_UPGRADE_MAX_FEE:
+    uint64 newMaxFee; // update maxFee
 };
 
 /* Entries used to define the bucket list */
@@ -269,9 +273,19 @@ struct OperationMeta
     LedgerEntryChanges changes;
 };
 
+struct TransactionMetaV1
+{
+    LedgerEntryChanges txChanges; // tx level changes if any
+    OperationMeta operations<>; // meta for each operation
+};
+
+// this is the meta produced when applying transactions
+// it does not include pre-apply updates such as fees
 union TransactionMeta switch (int v)
 {
 case 0:
     OperationMeta operations<>;
+case 1:
+    TransactionMetaV1 v1;
 };
 }

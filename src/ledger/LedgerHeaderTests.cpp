@@ -6,13 +6,15 @@
 #include "crypto/Hex.h"
 #include "herder/LedgerCloseData.h"
 #include "ledger/LedgerManager.h"
+#include "ledger/LedgerState.h"
+#include "ledger/LedgerStateHeader.h"
 #include "lib/catch.hpp"
 #include "main/Application.h"
 #include "test/TestUtils.h"
 #include "test/test.h"
+#include "transactions/TransactionUtils.h"
 #include "util/Logging.h"
 #include "util/Timer.h"
-#include "util/make_unique.h"
 #include "xdrpp/marshal.h"
 
 #include "main/Config.h"
@@ -26,6 +28,7 @@ TEST_CASE("genesisledger", "[ledger]")
 {
     VirtualClock clock{};
     auto cfg = getTestConfig(0);
+    cfg.USE_CONFIG_FOR_GENESIS = false;
     auto app = Application::create<ApplicationImpl>(clock, cfg);
     app->start();
 
@@ -106,9 +109,11 @@ TEST_CASE("base reserve", "[ledger]")
     int64 expectedReserve = 2000200000000ll;
 
     for_versions_to(8, *app, [&]() {
-        REQUIRE(app->getLedgerManager().getMinBalance(n) < expectedReserve);
+        LedgerState ls(app->getLedgerStateRoot());
+        REQUIRE(getMinBalance(ls.loadHeader(), n) < expectedReserve);
     });
     for_versions_from(9, *app, [&]() {
-        REQUIRE(app->getLedgerManager().getMinBalance(n) == expectedReserve);
+        LedgerState ls(app->getLedgerStateRoot());
+        REQUIRE(getMinBalance(ls.loadHeader(), n) == expectedReserve);
     });
 }

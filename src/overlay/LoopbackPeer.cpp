@@ -5,8 +5,6 @@
 #include "overlay/LoopbackPeer.h"
 #include "crypto/Random.h"
 #include "main/Application.h"
-#include "medida/meter.h"
-#include "medida/metrics_registry.h"
 #include "medida/timer.h"
 #include "overlay/LoadManager.h"
 #include "overlay/OverlayManager.h"
@@ -78,6 +76,16 @@ LoopbackPeer::sendMessage(xdr::msg_ptr&& msg)
 }
 
 void
+LoopbackPeer::drop(ErrorCode err, std::string const& msg)
+{
+    if (mState != CLOSING)
+    {
+        mDropReason = msg;
+    }
+    Peer::drop(err, msg);
+}
+
+void
 LoopbackPeer::drop(bool)
 {
     if (mState == CLOSING)
@@ -91,8 +99,7 @@ LoopbackPeer::drop(bool)
     auto remote = mRemote.lock();
     if (remote)
     {
-        remote->getApp().getClock().getIOService().post(
-            [remote]() { remote->drop(); });
+        remote->getApp().postOnMainThread([remote]() { remote->drop(); });
     }
 }
 
@@ -140,8 +147,7 @@ LoopbackPeer::processInQueue()
         if (!mInQueue.empty())
         {
             auto self = static_pointer_cast<LoopbackPeer>(shared_from_this());
-            mApp.getClock().getIOService().post(
-                [self]() { self->processInQueue(); });
+            mApp.postOnMainThread([self]() { self->processInQueue(); });
         }
     }
 }
@@ -206,7 +212,7 @@ LoopbackPeer::deliverOne()
         {
             // move msg to remote's in queue
             remote->mInQueue.emplace(std::move(msg));
-            remote->getApp().getClock().getIOService().post(
+            remote->getApp().postOnMainThread(
                 [remote]() { remote->processInQueue(); });
         }
         LoadManager::PeerContext loadCtx(mApp, mPeerID);
@@ -391,7 +397,7 @@ LoopbackPeerConnection::LoopbackPeerConnection(Application& initiator,
     mAcceptor->startIdleTimer();
 
     auto init = mInitiator;
-    mInitiator->getApp().getClock().getIOService().post(
+    mInitiator->getApp().postOnMainThread(
         [init]() { init->connectHandler(asio::error_code()); });
 }
 

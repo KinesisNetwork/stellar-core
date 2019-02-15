@@ -18,23 +18,17 @@ namespace stellar
 GetHistoryArchiveStateWork::GetHistoryArchiveStateWork(
     Application& app, WorkParent& parent, std::string uniqueName,
     HistoryArchiveState& state, uint32_t seq,
-    VirtualClock::duration const& initialDelay,
-    std::shared_ptr<HistoryArchive const> archive, size_t maxRetries)
+    std::shared_ptr<HistoryArchive> archive, size_t maxRetries)
     : Work(app, parent, std::move(uniqueName), maxRetries)
     , mState(state)
     , mSeq(seq)
-    , mInitialDelay(initialDelay)
     , mArchive(archive)
     , mLocalFilename(
           archive ? HistoryArchiveState::localName(app, archive->getName())
                   : app.getHistoryManager().localFilename(
                         HistoryArchiveState::baseName()))
-    , mGetHistoryArchiveStateStart(app.getMetrics().NewMeter(
-          {"history", "download-history-archive-state", "start"}, "event"))
     , mGetHistoryArchiveStateSuccess(app.getMetrics().NewMeter(
           {"history", "download-history-archive-state", "success"}, "event"))
-    , mGetHistoryArchiveStateFailure(app.getMetrics().NewMeter(
-          {"history", "download-history-archive-state", "failure"}, "event"))
 {
 }
 
@@ -54,16 +48,6 @@ GetHistoryArchiveStateWork::getStatus() const
     return Work::getStatus();
 }
 
-VirtualClock::duration
-GetHistoryArchiveStateWork::getRetryDelay() const
-{
-    if (mInitialDelay.count() != 0 && mRetries == 0)
-    {
-        return mInitialDelay;
-    }
-    return Work::getRetryDelay();
-}
-
 void
 GetHistoryArchiveStateWork::onReset()
 {
@@ -73,19 +57,6 @@ GetHistoryArchiveStateWork::onReset()
                                    ? HistoryArchiveState::wellKnownRemoteName()
                                    : HistoryArchiveState::remoteName(mSeq),
                                mLocalFilename, mArchive, getMaxRetries());
-
-    if (mSeq != 0 && mRetries == 0 && mInitialDelay.count() != 0)
-    {
-        // If this is our first reset (on addition) and we're fetching a
-        // known snapshot, immediately initiate a timed retry, to avoid
-        // cluttering the console with the initial-probe failure.
-        setState(WORK_FAILURE_RETRY);
-        scheduleRetry();
-    }
-    else
-    {
-        mGetHistoryArchiveStateStart.Mark();
-    }
 }
 
 void
@@ -113,14 +84,12 @@ GetHistoryArchiveStateWork::onSuccess()
 void
 GetHistoryArchiveStateWork::onFailureRetry()
 {
-    mGetHistoryArchiveStateFailure.Mark();
     Work::onFailureRetry();
 }
 
 void
 GetHistoryArchiveStateWork::onFailureRaise()
 {
-    mGetHistoryArchiveStateFailure.Mark();
     Work::onFailureRaise();
 }
 }

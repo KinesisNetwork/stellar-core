@@ -13,12 +13,11 @@
 #include "crypto/SHA.h"
 #include "herder/HerderImpl.h"
 #include "history/HistoryArchive.h"
+#include "history/HistoryArchiveManager.h"
 #include "history/HistoryManagerImpl.h"
 #include "history/StateSnapshot.h"
 #include "historywork/FetchRecentQsetsWork.h"
-#include "historywork/GetHistoryArchiveStateWork.h"
 #include "historywork/PublishWork.h"
-#include "historywork/PutHistoryArchiveStateWork.h"
 #include "historywork/RepairMissingBucketsWork.h"
 #include "ledger/LedgerManager.h"
 #include "lib/util/format.h"
@@ -32,7 +31,6 @@
 #include "util/Math.h"
 #include "util/StatusManager.h"
 #include "util/TmpDir.h"
-#include "util/make_unique.h"
 #include "work/WorkManager.h"
 #include "xdrpp/marshal.h"
 
@@ -57,147 +55,10 @@ HistoryManager::dropAll(Database& db)
     st.execute(true);
 }
 
-bool
-HistoryManager::initializeHistoryArchive(Application& app, std::string arch)
-{
-    auto const& cfg = app.getConfig();
-    auto i = cfg.HISTORY.find(arch);
-    if (i == cfg.HISTORY.end())
-    {
-        CLOG(FATAL, "History")
-            << "Can't initialize unknown history archive '" << arch << "'";
-        return false;
-    }
-
-    auto& wm = app.getWorkManager();
-
-    // First check that there's no existing HAS in the archive
-    HistoryArchiveState existing;
-    CLOG(INFO, "History") << "Probing history archive '" << arch
-                          << "' for existing state";
-    auto getHas = wm.executeWork<GetHistoryArchiveStateWork>(
-        false, "get-history-archive-state", existing, 0,
-        std::chrono::seconds(0), i->second, 0);
-    if (getHas->getState() == Work::WORK_SUCCESS)
-    {
-        CLOG(ERROR, "History")
-            << "History archive '" << arch << "' already initialized!";
-        return false;
-    }
-    CLOG(INFO, "History") << "History archive '" << arch
-                          << "' appears uninitialized";
-
-    HistoryArchiveState has;
-    CLOG(INFO, "History") << "Initializing history archive '" << arch << "'";
-    has.resolveAllFutures();
-
-    auto putHas =
-        wm.executeWork<PutHistoryArchiveStateWork>(false, has, i->second);
-    if (putHas->getState() == Work::WORK_SUCCESS)
-    {
-        CLOG(INFO, "History") << "Initialized history archive '" << arch << "'";
-        return true;
-    }
-    else
-    {
-        CLOG(FATAL, "History")
-            << "Failed to initialize history archive '" << arch << "'";
-        return false;
-    }
-}
-
 std::unique_ptr<HistoryManager>
 HistoryManager::create(Application& app)
 {
-    return make_unique<HistoryManagerImpl>(app);
-}
-
-bool
-HistoryManager::checkSensibleConfig(Config const& cfg)
-{
-    // Check reasonable-ness of history archive definitions
-    std::vector<std::string> readOnlyArchives;
-    std::vector<std::string> readWriteArchives;
-    std::vector<std::string> writeOnlyArchives;
-    std::vector<std::string> inertArchives;
-
-    for (auto const& pair : cfg.HISTORY)
-    {
-        if (pair.second->hasGetCmd())
-        {
-            if (pair.second->hasPutCmd())
-            {
-                readWriteArchives.push_back(pair.first);
-            }
-            else
-            {
-                readOnlyArchives.push_back(pair.first);
-            }
-        }
-        else
-        {
-            if (pair.second->hasPutCmd())
-            {
-                writeOnlyArchives.push_back(pair.first);
-            }
-            else
-            {
-                inertArchives.push_back(pair.first);
-            }
-        }
-    }
-
-    bool badArchives = false;
-
-    for (auto const& a : inertArchives)
-    {
-        CLOG(FATAL, "History")
-            << "Archive '" << a
-            << "' has no 'get' or 'put' command, will not function";
-        badArchives = true;
-    }
-
-    for (auto const& a : writeOnlyArchives)
-    {
-        CLOG(FATAL, "History")
-            << "Archive '" << a
-            << "' has 'put' but no 'get' command, will be unwritable";
-        badArchives = true;
-    }
-
-    for (auto const& a : readWriteArchives)
-    {
-        CLOG(INFO, "History")
-            << "Archive '" << a
-            << "' has 'put' and 'get' commands, will be read and written";
-    }
-
-    for (auto const& a : readOnlyArchives)
-    {
-        CLOG(INFO, "History")
-            << "Archive '" << a
-            << "' has 'get' command only, will not be written";
-    }
-
-    if (readOnlyArchives.empty() && readWriteArchives.empty())
-    {
-        CLOG(FATAL, "History")
-            << "No readable archives configured, catchup will fail.";
-        badArchives = true;
-    }
-
-    if (readWriteArchives.empty())
-    {
-        CLOG(WARNING, "History")
-            << "No writable archives configured, history will not be written.";
-    }
-
-    if (badArchives)
-    {
-        CLOG(ERROR, "History") << "History archives misconfigured.";
-        return false;
-    }
-    return true;
+    return std::make_unique<HistoryManagerImpl>(app);
 }
 
 HistoryManagerImpl::HistoryManagerImpl(Application& app)
@@ -205,14 +66,6 @@ HistoryManagerImpl::HistoryManagerImpl(Application& app)
     , mWorkDir(nullptr)
     , mPublishWork(nullptr)
 
-    , mPublishSkip(
-          app.getMetrics().NewMeter({"history", "publish", "skip"}, "event"))
-    , mPublishQueue(
-          app.getMetrics().NewMeter({"history", "publish", "queue"}, "event"))
-    , mPublishDelay(
-          app.getMetrics().NewMeter({"history", "publish", "delay"}, "event"))
-    , mPublishStart(
-          app.getMetrics().NewMeter({"history", "publish", "start"}, "event"))
     , mPublishSuccess(
           app.getMetrics().NewMeter({"history", "publish", "success"}, "event"))
     , mPublishFailure(
@@ -257,22 +110,6 @@ HistoryManagerImpl::nextCheckpointLedger(uint32_t ledger) const
     if (ledger == 0)
         return freq;
     return (((ledger + freq - 1) / freq) * freq);
-}
-
-uint64_t
-HistoryManagerImpl::nextCheckpointCatchupProbe(uint32_t ledger) const
-{
-    uint32_t next = this->nextCheckpointLedger(ledger);
-
-    auto ledger_duration =
-        Herder::EXP_LEDGER_TIMESPAN_SECONDS + std::chrono::seconds(1);
-
-    if (mApp.getConfig().ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING)
-    {
-        ledger_duration = std::chrono::seconds(1);
-    }
-
-    return (((next - ledger) + 5) * ledger_duration.count());
 }
 
 void
@@ -323,7 +160,7 @@ HistoryManagerImpl::getTmpDir()
     if (!mWorkDir)
     {
         TmpDir t = mApp.getTmpDirManager().tmpDir("history");
-        mWorkDir = make_unique<TmpDir>(std::move(t));
+        mWorkDir = std::make_unique<TmpDir>(std::move(t));
     }
     return mWorkDir->getName();
 }
@@ -337,8 +174,7 @@ HistoryManagerImpl::localFilename(std::string const& basename)
 HistoryArchiveState
 HistoryManagerImpl::getLastClosedHistoryArchiveState() const
 {
-    auto seq =
-        mApp.getLedgerManager().getLastClosedLedgerHeader().header.ledgerSeq;
+    auto seq = mApp.getLedgerManager().getLastClosedLedgerNum();
     auto& bl = mApp.getBucketManager().getBucketList();
     return HistoryArchiveState(seq, bl);
 }
@@ -347,77 +183,9 @@ InferredQuorum
 HistoryManagerImpl::inferQuorum()
 {
     InferredQuorum iq;
-    bool done = false;
-    auto handler = [&done](asio::error_code const& ec) { done = true; };
     CLOG(INFO, "History") << "Starting FetchRecentQsetsWork";
-    mApp.getWorkManager().addWork<FetchRecentQsetsWork>(iq, handler);
-    mApp.getWorkManager().advanceChildren();
-    while (!done)
-    {
-        mApp.getClock().crank(false);
-    }
+    mApp.getWorkManager().executeWork<FetchRecentQsetsWork>(iq);
     return iq;
-}
-
-bool
-HistoryManagerImpl::hasAnyWritableHistoryArchive()
-{
-    auto const& hist = mApp.getConfig().HISTORY;
-    for (auto const& pair : hist)
-    {
-        if (pair.second->hasGetCmd() && pair.second->hasPutCmd())
-            return true;
-    }
-    return false;
-}
-
-std::shared_ptr<HistoryArchive>
-HistoryManagerImpl::selectRandomReadableHistoryArchive()
-{
-    std::vector<std::pair<std::string, std::shared_ptr<HistoryArchive>>>
-        archives;
-
-    // First try for archives that _only_ have a get command; they're
-    // archives we're explicitly not publishing to, so likely ones we want.
-    for (auto const& pair : mApp.getConfig().HISTORY)
-    {
-        if (pair.second->hasGetCmd() && !pair.second->hasPutCmd())
-        {
-            archives.push_back(pair);
-        }
-    }
-
-    // If we have none of those, accept those with get+put
-    if (archives.size() == 0)
-    {
-        for (auto const& pair : mApp.getConfig().HISTORY)
-        {
-            if (pair.second->hasGetCmd() && pair.second->hasPutCmd())
-            {
-                archives.push_back(pair);
-            }
-        }
-    }
-
-    if (archives.size() == 0)
-    {
-        throw std::runtime_error("No GET-enabled history archive in config");
-    }
-    else if (archives.size() == 1)
-    {
-        CLOG(DEBUG, "History")
-            << "Fetching from sole readable history archive '"
-            << archives[0].first << "'";
-        return archives[0].second;
-    }
-    else
-    {
-        std::uniform_int_distribution<size_t> dist(0, archives.size() - 1);
-        size_t i = dist(gRandomEngine);
-        CLOG(DEBUG, "History") << "Fetching from readable history archive #"
-                               << i << ", '" << archives[i].first << "'";
-        return archives[i].second;
-    }
 }
 
 uint32_t
@@ -459,15 +227,14 @@ HistoryManagerImpl::getMaxLedgerQueuedToPublish()
 bool
 HistoryManagerImpl::maybeQueueHistoryCheckpoint()
 {
-    uint32_t seq = mApp.getLedgerManager().getLedgerNum();
+    uint32_t seq = mApp.getLedgerManager().getLastClosedLedgerNum() + 1;
     if (seq != nextCheckpointLedger(seq))
     {
         return false;
     }
 
-    if (!hasAnyWritableHistoryArchive())
+    if (!mApp.getHistoryArchiveManager().hasAnyWritableHistoryArchive())
     {
-        mPublishSkip.Mark();
         CLOG(DEBUG, "History")
             << "Skipping checkpoint, no writable history archives";
         return false;
@@ -502,7 +269,7 @@ HistoryManagerImpl::queueCurrentHistory()
     // into the in-memory publish queue in order to preserve those
     // merges-in-progress, avoid restarting them.
 
-    mPublishQueue.Mark();
+    mPublishQueued++;
     mPublishQueueBuckets.addBuckets(has.allBuckets());
     takeSnapshotAndPublish(has);
 }
@@ -512,7 +279,6 @@ HistoryManagerImpl::takeSnapshotAndPublish(HistoryArchiveState const& has)
 {
     if (mPublishWork)
     {
-        mPublishDelay.Mark();
         return;
     }
     auto ledgerSeq = has.currentLedger;
@@ -636,8 +402,7 @@ HistoryManagerImpl::historyPublished(
         this->mPublishFailure.Mark();
     }
     mPublishWork.reset();
-    mApp.getClock().getIOService().post(
-        [this]() { this->publishQueuedHistory(); });
+    mApp.postOnMainThread([this]() { this->publishQueuedHistory(); });
 }
 
 void
@@ -652,27 +417,9 @@ HistoryManagerImpl::downloadMissingBuckets(
 }
 
 uint64_t
-HistoryManagerImpl::getPublishSkipCount()
-{
-    return mPublishSkip.count();
-}
-
-uint64_t
 HistoryManagerImpl::getPublishQueueCount()
 {
-    return mPublishQueue.count();
-}
-
-uint64_t
-HistoryManagerImpl::getPublishDelayCount()
-{
-    return mPublishDelay.count();
-}
-
-uint64_t
-HistoryManagerImpl::getPublishStartCount()
-{
-    return mPublishStart.count();
+    return mPublishQueued;
 }
 
 uint64_t

@@ -12,7 +12,6 @@
 
 namespace asio
 {
-class io_service;
 }
 namespace medida
 {
@@ -27,6 +26,7 @@ class TmpDirManager;
 class LedgerManager;
 class BucketManager;
 class CatchupManager;
+class HistoryArchiveManager;
 class HistoryManager;
 class Maintainer;
 class ProcessManager;
@@ -41,6 +41,7 @@ class CommandHandler;
 class WorkManager;
 class BanManager;
 class StatusManager;
+class LedgerStateRoot;
 
 class Application;
 void validateNetworkPassphrase(std::shared_ptr<Application> app);
@@ -185,11 +186,15 @@ class Application
     // Call syncOwnMetrics on self and syncMetrics all objects owned by App.
     virtual void syncAllMetrics() = 0;
 
+    // Clear all metrics
+    virtual void clearMetrics(std::string const& domain) = 0;
+
     // Get references to each of the "subsystem" objects.
     virtual TmpDirManager& getTmpDirManager() = 0;
     virtual LedgerManager& getLedgerManager() = 0;
     virtual BucketManager& getBucketManager() = 0;
     virtual CatchupManager& getCatchupManager() = 0;
+    virtual HistoryArchiveManager& getHistoryArchiveManager() = 0;
     virtual HistoryManager& getHistoryManager() = 0;
     virtual Maintainer& getMaintainer() = 0;
     virtual ProcessManager& getProcessManager() = 0;
@@ -208,6 +213,10 @@ class Application
     // this io_service will execute in parallel with the calling thread, so use
     // with caution.
     virtual asio::io_service& getWorkerIOService() = 0;
+
+    virtual void postOnMainThread(std::function<void()>&& f) = 0;
+    virtual void postOnMainThreadWithDelay(std::function<void()>&& f) = 0;
+    virtual void postOnBackgroundThread(std::function<void()>&& f) = 0;
 
     // Perform actions necessary to transition from BOOTING_STATE to other
     // states. In particular: either reload or reinitialize the database, and
@@ -231,14 +240,12 @@ class Application
 
     // If config.ARTIFICIALLY_GENERATE_LOAD_FOR_TESTING=true, generate some load
     // against the current application.
-    virtual void generateLoad(uint32_t nAccounts, uint32_t nTxs,
-                              uint32_t txRate, bool autoRate) = 0;
+    virtual void generateLoad(bool isCreate, uint32_t nAccounts,
+                              uint32_t offset, uint32_t nTxs, uint32_t txRate,
+                              uint32_t batchSize, bool autoRate) = 0;
 
     // Access the load generator for manual operation.
     virtual LoadGenerator& getLoadGenerator() = 0;
-
-    // Run a consistency check between the database and the bucketlist.
-    virtual void checkDB() = 0;
 
     // Execute any administrative commands written in the Config.COMMANDS
     // variable of the config file. This permits scripting certain actions to
@@ -260,6 +267,8 @@ class Application
     virtual Hash const& getNetworkID() const = 0;
 
     virtual void newDB() = 0;
+
+    virtual LedgerStateRoot& getLedgerStateRoot() = 0;
 
     // Factory: create a new Application object bound to `clock`, with a local
     // copy made of `cfg`.

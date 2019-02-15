@@ -14,7 +14,9 @@
 
 namespace stellar
 {
+class AbstractLedgerState;
 class Config;
+class Database;
 struct LedgerHeader;
 struct LedgerUpgrade;
 
@@ -34,6 +36,8 @@ class Upgrades
             mBaseFee = make_optional<uint32>(cfg.TESTING_UPGRADE_DESIRED_FEE);
             mBasePercentageFee = make_optional<uint32>(
                 cfg.TESTING_UPGRADE_DESIRED_PERCENTAGE_FEE);
+            mMaxFee =
+                make_optional<uint64>(cfg.TESTING_UPGRADE_DESIRED_MAX_FEE);
             mMaxTxSize =
                 make_optional<uint32>(cfg.TESTING_UPGRADE_MAX_TX_PER_LEDGER);
             mBaseReserve = make_optional<uint32>(cfg.TESTING_UPGRADE_RESERVE);
@@ -42,6 +46,7 @@ class Upgrades
         optional<uint32> mProtocolVersion;
         optional<uint32> mBaseFee;
         optional<uint32> mBasePercentageFee;
+        optional<uint64> mMaxFee;
         optional<uint32> mMaxTxSize;
         optional<uint32> mBaseReserve;
 
@@ -63,16 +68,16 @@ class Upgrades
     createUpgradesFor(LedgerHeader const& header) const;
 
     // apply upgrade to ledger header
-    static void applyTo(LedgerUpgrade const& upgrade, LedgerHeader& header);
+    static void applyTo(LedgerUpgrade const& upgrade, AbstractLedgerState& ls);
 
     // convert upgrade value to string
     static std::string toString(LedgerUpgrade const& upgrade);
 
     // returns true if upgrade is a valid upgrade step
     // in which case it also sets upgradeType
-    bool isValid(uint64_t closeTime, UpgradeType const& upgrade,
-                 LedgerUpgradeType& upgradeType, bool nomination,
-                 Config const& cfg) const;
+    bool isValid(UpgradeType const& upgrade, LedgerUpgradeType& upgradeType,
+                 bool nomination, Config const& cfg,
+                 LedgerHeader const& header) const;
 
     // constructs a human readable string that represents
     // the pending upgrades
@@ -84,9 +89,24 @@ class Upgrades
                    std::vector<UpgradeType>::const_iterator endUpdates,
                    bool& updated);
 
+    static void dropAll(Database& db);
+
+    static void storeUpgradeHistory(Database& db, uint32_t ledgerSeq,
+                                    LedgerUpgrade const& upgrade,
+                                    LedgerEntryChanges const& changes,
+                                    int index);
+    static void deleteOldEntries(Database& db, uint32_t ledgerSeq,
+                                 uint32_t count);
+
   private:
     UpgradeParameters mParams;
 
     bool timeForUpgrade(uint64_t time) const;
+
+    static void applyVersionUpgrade(AbstractLedgerState& ls,
+                                    uint32_t newVersion);
+
+    static void applyReserveUpgrade(AbstractLedgerState& ls,
+                                    uint32_t newReserve);
 };
-}
+} // namespace stellar

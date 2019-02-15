@@ -4,19 +4,12 @@
 
 #include "TestUtils.h"
 #include "overlay/LoopbackPeer.h"
-#include "util/make_unique.h"
 
 namespace stellar
 {
 
 namespace testutil
 {
-
-void
-setCurrentLedgerVersion(LedgerManager& lm, uint32_t currentLedgerVersion)
-{
-    lm.getCurrentLedgerHeader().ledgerVersion = currentLedgerVersion;
-}
 
 void
 crankSome(VirtualClock& clock)
@@ -38,12 +31,11 @@ injectSendPeersAndReschedule(VirtualClock::time_point& end, VirtualClock& clock,
     if (clock.now() < end && connection.getInitiator()->isConnected())
     {
         timer.expires_from_now(std::chrono::milliseconds(10));
-        timer.async_wait([&](asio::error_code const& ec) {
-            if (!ec)
-            {
+        timer.async_wait(
+            [&]() {
                 injectSendPeersAndReschedule(end, clock, timer, connection);
-            }
-        });
+            },
+            &VirtualTimer::onFailureNoop);
     }
 }
 
@@ -79,7 +71,7 @@ TestApplication::TestApplication(VirtualClock& clock, Config const& cfg)
 std::unique_ptr<InvariantManager>
 TestApplication::createInvariantManager()
 {
-    return make_unique<TestInvariantManager>(getMetrics());
+    return std::make_unique<TestInvariantManager>(getMetrics());
 }
 
 time_t
