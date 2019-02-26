@@ -12,6 +12,8 @@ AM_INIT_AUTOMAKE([-Wall -Wextra -Wconversion subdir-objects tar-ustar silent-rul
 AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_MACRO_DIR([m4])
 
+AC_ARG_VAR([LIBCXX_PATH], [path to libc++ and libc++abi])
+
 if test -z "${WFLAGS+set}"; then
    WFLAGS=-Wall
 
@@ -108,14 +110,18 @@ AS_IF([test "x$enable_memcheck" = "xyes"], [
   ])
   sanitizeopts="memory -fsanitize-memory-track-origins=2 -fsanitize-memory-use-after-dtor"
 
-  AC_ARG_VAR([LIBCXX_PATH], [path to libc++ and libc++abi])
-
   if test -z "$LIBCXX_PATH"; then
    AC_MSG_ERROR(LIBCXX_PATH must be set for memcheck to work)
   fi
 
-  CXXFLAGS="$CXXFLAGS -stdlib=libc++ -DMSAN_ENABLED"
-  LDFLAGS="$LDFLAGS -fsanitize=$sanitizeopts -L$LIBCXX_PATH -stdlib=libc++ -lc++abi -Wl,-rpath -Wl,$LIBCXX_PATH"
+  CXXFLAGS="$CXXFLAGS -DMSAN_ENABLED"
+  LDFLAGS="$LDFLAGS -fsanitize=$sanitizeopts"
+])
+
+AS_IF([test x != "x$LIBCXX_PATH"], [
+  # use custom libc++
+  CXXFLAGS="$CXXFLAGS -stdlib=libc++"
+  LDFLAGS="$LDFLAGS -L$LIBCXX_PATH -stdlib=libc++ -lc++abi -Wl,-rpath -Wl,$LIBCXX_PATH"
 ])
 
 AC_ARG_ENABLE([undefinedcheck],
@@ -137,7 +143,6 @@ AS_IF([test x != "x$sanitizeopts"], [
 
   # compile our own libraries when sanitizers are enabled
   libsodium_INTERNAL=yes
-  sqlite3_INTERNAL=yes
   xdrpp_INTERNAL=yes
 
 ])
@@ -205,15 +210,13 @@ if test yes != "$enable_shared"; then
    ac_configure_args="$ac_configure_args --disable-shared"
 fi
 
-# We use partial indexes, a feature in sqlite 3.8.0. Also even if not using
-# partial indexes, there was a bug concerning ROLLBACK interacting with
-# non-reset prepared statements poorly prior to 3.7.11.
-PKG_CHECK_MODULES(sqlite3, [sqlite3 >= 3.8.0], :, sqlite3_INTERNAL=yes)
-AM_CONDITIONAL(SQLITE3_INTERNAL, [test yes = "$sqlite3_INTERNAL"])
-if test yes = "$sqlite3_INTERNAL"; then
-   sqlite3_CFLAGS='-isystem $(top_srcdir)/lib/sqlite'
-   sqlite3_LIBS=
-fi
+# We use several features of sqlite that require not just a new version
+# (eg. partial indexes, >=3.8.0; upserts, >= 3.24.0) but also the carray
+# extension, which is compiled-out of most platform sqlites. We therefore
+# always use our own bundled copy, version 3.26.0 at the time of this
+# writing.
+sqlite3_CFLAGS='-isystem $(top_srcdir)/lib/sqlite -DSQLITE_CORE -DSQLITE_OMIT_LOAD_EXTENSION=1'
+sqlite3_LIBS=
 AC_SUBST(sqlite3_CFLAGS)
 AC_SUBST(sqlite3_LIBS)
 
@@ -255,7 +258,6 @@ AC_SUBST(libmedida_CFLAGS)
 AC_SUBST(libmedida_LIBS)
 
 soci_CFLAGS='-isystem $(top_srcdir)/lib/soci/src/core'
-soci_CFLAGS="$soci_CFLAGS "'-isystem $(top_srcdir)/lib/soci/src/backends/sqlite3'
 soci_LIBS='$(top_builddir)/lib/libsoci.a'
 AC_SUBST(soci_CFLAGS)
 AC_SUBST(soci_LIBS)
@@ -271,10 +273,6 @@ if test x"$enable_postgres" != xno; then
     PKG_CHECK_MODULES(libpq, libpq, have_postgres=1)
     if test -n "$enable_postgres" -a -z "$have_postgres"; then
        AC_MSG_ERROR([Cannot find postgres library])
-    fi
-    if test -n "$have_postgres"; then
-       backend=
-       soci_CFLAGS="$soci_CFLAGS "'-isystem $(top_srcdir)/lib/soci/src/backends/postgresql'
     fi
 fi
 AM_CONDITIONAL(USE_POSTGRES, [test -n "$have_postgres"])

@@ -28,10 +28,10 @@ class Histogram;
 
 namespace stellar
 {
-class AbstractLedgerState;
+class AbstractLedgerTxn;
 class Application;
 class Database;
-class LedgerStateHeader;
+class LedgerTxnHeader;
 
 class LedgerManagerImpl : public LedgerManager
 {
@@ -40,6 +40,8 @@ class LedgerManagerImpl : public LedgerManager
     Application& mApp;
     medida::Timer& mTransactionApply;
     medida::Histogram& mTransactionCount;
+    medida::Histogram& mOperationCount;
+    medida::Counter& mInternalErrorCount;
     medida::Timer& mLedgerClose;
     medida::Timer& mLedgerAgeClosed;
     medida::Counter& mLedgerAge;
@@ -64,13 +66,13 @@ class LedgerManagerImpl : public LedgerManager
     void applyBufferedLedgers();
 
     void processFeesSeqNums(std::vector<TransactionFramePtr>& txs,
-                            AbstractLedgerState& lsOuter);
+                            AbstractLedgerTxn& ltxOuter);
 
     void applyTransactions(std::vector<TransactionFramePtr>& txs,
-                           AbstractLedgerState& ls,
+                           AbstractLedgerTxn& ltx,
                            TransactionResultSet& txResultSet);
 
-    void ledgerClosed(AbstractLedgerState& ls);
+    void ledgerClosed(AbstractLedgerTxn& ltx);
 
     void storeCurrentLedger(LedgerHeader const& header);
     void advanceLedgerPointers(LedgerHeader const& header);
@@ -122,9 +124,6 @@ class LedgerManagerImpl : public LedgerManager
     void startCatchup(CatchupConfiguration configuration,
                       bool manualCatchup) override;
 
-    HistoryManager::LedgerVerificationStatus
-    verifyCatchupCandidate(LedgerHeaderHistoryEntry const&,
-                           bool manualCatchup) const override;
     void closeLedger(LedgerCloseData const& ledgerData) override;
     void deleteOldEntries(Database& db, uint32_t ledgerSeq,
                           uint32_t count) override;

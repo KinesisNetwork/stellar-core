@@ -6,15 +6,17 @@
 
 #include "util/asio.h"
 
-#include "ledger/LedgerState.h"
-#include "ledger/LedgerStateHeader.h"
+#include "ledger/LedgerTxn.h"
+#include "ledger/LedgerTxnHeader.h"
 #include "main/Config.h"
 #include "main/StellarCoreVersion.h"
 #include "test.h"
 #include "test/TestUtils.h"
 #include "util/Logging.h"
 #include "util/TmpDir.h"
+
 #include <cstdlib>
+#include <lib/util/format.h>
 #include <numeric>
 #include <time.h>
 
@@ -116,11 +118,6 @@ getTestConfig(int instanceNumber, Config::TestDbMode mode)
         thisConfig.UNSAFE_QUORUM = true;
 
         thisConfig.NETWORK_PASSPHRASE = "(V) (;,,;) (V)";
-
-        // disable NTP - travis-ci does not allow network access:
-        // The container-based, OSX, and GCE (both Precise and Trusty) builds do
-        // not currently have IPv6 connectivity.
-        thisConfig.NTP_SERVER.clear();
 
         std::ostringstream dbname;
         switch (mode)
@@ -309,8 +306,8 @@ for_versions(std::vector<uint32> const& versions, Application& app,
 {
     uint32_t previousVersion = 0;
     {
-        LedgerState ls(app.getLedgerStateRoot());
-        previousVersion = ls.loadHeader().current().ledgerVersion;
+        LedgerTxn ltx(app.getLedgerTxnRoot());
+        previousVersion = ltx.loadHeader().current().ledgerVersion;
     }
 
     for (auto v : versions)
@@ -324,18 +321,18 @@ for_versions(std::vector<uint32> const& versions, Application& app,
         SECTION("protocol version " + std::to_string(v))
         {
             {
-                LedgerState ls(app.getLedgerStateRoot());
-                ls.loadHeader().current().ledgerVersion = v;
-                ls.commit();
+                LedgerTxn ltx(app.getLedgerTxnRoot());
+                ltx.loadHeader().current().ledgerVersion = v;
+                ltx.commit();
             }
             f();
         }
     }
 
     {
-        LedgerState ls(app.getLedgerStateRoot());
-        ls.loadHeader().current().ledgerVersion = previousVersion;
-        ls.commit();
+        LedgerTxn ltx(app.getLedgerTxnRoot());
+        ltx.loadHeader().current().ledgerVersion = previousVersion;
+        ltx.commit();
     }
 }
 

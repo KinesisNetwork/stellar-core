@@ -28,13 +28,16 @@ apt-get autoremove -y
 # put back 2 needed awscli packages
 apt-get install -y python-six python-colorama
 
+# update aws cli to avoid ImportError: No module named pyasn1.error
+pip install awscli --ignore-installed six
+
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 rm -rf /var/log/*.log /var/log/*/*.log
 
 # delete a handful of items we don't need and take up some actual space
-rm -rf /usr/include
 rm -rf /usr/share/{file,man,doc}
+rm -rf /usr/include
 rm -rf /usr/lib/llvm-3.6/build /usr/share/llvm-3.6/cmake
 rm -rf /usr/lib/llvm-3.6/lib/*.a ./lib/x86_64-linux-gnu/*.a
 rm -rf /usr/lib/llvm-3.6/bin/{opt,lli,llc,llvm-tblgen,bugpoint}

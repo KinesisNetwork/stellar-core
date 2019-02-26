@@ -53,7 +53,7 @@ class LedgerManager
         LM_BOOTING_STATE,
 
         // local state is in sync with view of consensus coming from herder
-        // desynchronization will cause transition to CATCHING_UP_STATE.
+        // desynchronization will cause transition to LM_BOOTING_STATE.
         LM_SYNCED_STATE,
 
         // local state doesn't match view of consensus from herder
@@ -154,27 +154,6 @@ class LedgerManager
     // command line catchups.
     virtual void startCatchup(CatchupConfiguration configuration,
                               bool manualCatchup) = 0;
-
-    // Called by the history subsystem during catchup: this method asks the
-    // LedgerManager whether or not the HistoryManager should trust (thus: begin
-    // applying history that terminates in) a candidate LCL. Trust is based on
-    // local buffer in which LedgerManager accumulates SCP consensus results
-    // during catchup
-    //
-    // If catchup is manual then that buffer is empty, and VERIFY_STATUS_OK is
-    // returned.
-    //
-    // Otherwise LedgerManager returns VERIFY_STATUS_OK if the proposed ledger
-    // is a first member of that buffer (and has matching hash).
-    // VERIFY_STATUS_ERR_BAD_HASH is returned when hashes do not match.
-    // VERIFY_STATUS_ERR_BAD_LEDGER_VERSION is returned when history uses
-    // unknown ledger versions.
-    //
-    // If first member of consensus buffer has different sequnce than candidate
-    // then we have error in code and stellar-core is aborted.
-    virtual HistoryManager::LedgerVerificationStatus
-    verifyCatchupCandidate(LedgerHeaderHistoryEntry const& candidate,
-                           bool manualCatchup) const = 0;
 
     // Forcibly close the current ledger, applying `ledgerData` as the consensus
     // changes.  This is normally done automatically as part of

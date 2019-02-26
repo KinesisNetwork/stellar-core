@@ -30,8 +30,7 @@ class ProcessManager;
 class CommandHandler;
 class Database;
 class LoadGenerator;
-class NtpSynchronizationChecker;
-class LedgerStateRoot;
+class LedgerTxnRoot;
 
 class ApplicationImpl : public Application
 {
@@ -73,9 +72,12 @@ class ApplicationImpl : public Application
     virtual StatusManager& getStatusManager() override;
 
     virtual asio::io_service& getWorkerIOService() override;
-    virtual void postOnMainThread(std::function<void()>&& f) override;
-    virtual void postOnMainThreadWithDelay(std::function<void()>&& f) override;
-    virtual void postOnBackgroundThread(std::function<void()>&& f) override;
+    virtual void postOnMainThread(std::function<void()>&& f,
+                                  std::string jobName) override;
+    virtual void postOnMainThreadWithDelay(std::function<void()>&& f,
+                                           std::string jobName) override;
+    virtual void postOnBackgroundThread(std::function<void()>&& f,
+                                        std::string jobName) override;
 
     void newDB() override;
 
@@ -110,7 +112,7 @@ class ApplicationImpl : public Application
 
     virtual Hash const& getNetworkID() const override;
 
-    virtual LedgerStateRoot& getLedgerStateRoot() override;
+    virtual LedgerTxnRoot& getLedgerTxnRoot() override;
 
   protected:
     std::unique_ptr<LedgerManager>
@@ -136,7 +138,6 @@ class ApplicationImpl : public Application
     std::unique_ptr<asio::io_service::work> mWork;
 
     std::unique_ptr<Database> mDatabase;
-    std::unique_ptr<TmpDirManager> mTmpDirManager;
     std::unique_ptr<OverlayManager> mOverlayManager;
     std::unique_ptr<BucketManager> mBucketManager;
     std::unique_ptr<CatchupManager> mCatchupManager;
@@ -151,9 +152,8 @@ class ApplicationImpl : public Application
     std::unique_ptr<PersistentState> mPersistentState;
     std::unique_ptr<LoadGenerator> mLoadGenerator;
     std::unique_ptr<BanManager> mBanManager;
-    std::shared_ptr<NtpSynchronizationChecker> mNtpSynchronizationChecker;
     std::unique_ptr<StatusManager> mStatusManager;
-    std::unique_ptr<LedgerStateRoot> mLedgerStateRoot;
+    std::unique_ptr<LedgerTxnRoot> mLedgerTxnRoot;
 
     std::vector<std::thread> mWorkerThreads;
 
@@ -166,6 +166,9 @@ class ApplicationImpl : public Application
 
     std::unique_ptr<medida::MetricsRegistry> mMetrics;
     medida::Counter& mAppStateCurrent;
+    medida::Timer& mPostOnMainThreadDelay;
+    medida::Timer& mPostOnMainThreadWithDelayDelay;
+    medida::Timer& mPostOnBackgroundThreadDelay;
     VirtualClock::time_point mStartedOn;
 
     Hash mNetworkID;

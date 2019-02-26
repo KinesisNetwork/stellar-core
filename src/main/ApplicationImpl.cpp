@@ -25,11 +25,10 @@
 #include "invariant/LedgerEntryIsValid.h"
 #include "invariant/LiabilitiesMatchOffers.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
+#include "ledger/LedgerTxn.h"
 #include "main/CommandHandler.h"
 #include "main/ExternalQueue.h"
 #include "main/Maintainer.h"
-#include "main/NtpSynchronizationChecker.h"
 #include "main/StellarCoreVersion.h"
 #include "medida/counter.h"
 #include "medida/meter.h"
@@ -43,6 +42,7 @@
 #include "scp/QuorumSetUtils.h"
 #include "simulation/LoadGenerator.h"
 #include "util/GlobalChecks.h"
+#include "util/LogSlowExecution.h"
 #include "util/StatusManager.h"
 #include "work/WorkManager.h"
 
@@ -69,6 +69,12 @@ ApplicationImpl::ApplicationImpl(VirtualClock& clock, Config const& cfg)
     , mStoppingTimer(*this)
     , mMetrics(std::make_unique<medida::MetricsRegistry>())
     , mAppStateCurrent(mMetrics->NewCounter({"app", "state", "current"}))
+    , mPostOnMainThreadDelay(
+          mMetrics->NewTimer({"app", "post-on-main-thread", "delay"}))
+    , mPostOnMainThreadWithDelayDelay(mMetrics->NewTimer(
+          {"app", "post-on-main-thread-with-delay", "delay"}))
+    , mPostOnBackgroundThreadDelay(
+          mMetrics->NewTimer({"app", "post-on-background-thread", "delay"}))
     , mStartedOn(clock.now())
 {
 #ifdef SIGQUIT
@@ -104,8 +110,6 @@ ApplicationImpl::initialize()
 {
     mDatabase = std::make_unique<Database>(*this);
     mPersistentState = std::make_unique<PersistentState>(*this);
-    mTmpDirManager =
-        std::make_unique<TmpDirManager>(mConfig.BUCKET_DIR_PATH + "/tmp");
     mOverlayManager = createOverlayManager();
     mLedgerManager = LedgerManager::create(*this);
     mHerder = createHerder();
@@ -121,7 +125,7 @@ ApplicationImpl::initialize()
     mWorkManager = WorkManager::create(*this);
     mBanManager = BanManager::create(*this);
     mStatusManager = std::make_unique<StatusManager>();
-    mLedgerStateRoot = std::make_unique<LedgerStateRoot>(
+    mLedgerTxnRoot = std::make_unique<LedgerTxnRoot>(
         *mDatabase, mConfig.ENTRY_CACHE_SIZE, mConfig.BEST_OFFERS_CACHE_SIZE);
 
     BucketListIsConsistentWithDatabase::registerInvariant(*this);
@@ -130,14 +134,6 @@ ApplicationImpl::initialize()
     LedgerEntryIsValid::registerInvariant(*this);
     LiabilitiesMatchOffers::registerInvariant(*this);
     enableInvariantsFromConfig();
-
-    if (!mConfig.NTP_SERVER.empty())
-    {
-        mNtpSynchronizationChecker =
-            std::make_shared<NtpSynchronizationChecker>(*this,
-                                                        mConfig.NTP_SERVER);
-    }
-
     LOG(DEBUG) << "Application constructed";
 }
 
@@ -224,8 +220,6 @@ ApplicationImpl::getJsonInfo()
 
     auto& info = root["info"];
 
-    if (getConfig().UNSAFE_QUORUM)
-        info["UNSAFE_QUORUM"] = "UNSAFE QUORUM ALLOWED";
     info["build"] = STELLAR_CORE_VERSION;
     info["protocol_version"] = getConfig().LEDGER_PROTOCOL_VERSION;
     info["state"] = getStateHuman();
@@ -267,11 +261,8 @@ ApplicationImpl::getJsonInfo()
         info["invariant_failures"] = invariantFailures;
     }
 
-    auto historyArchiveInfo = getHistoryArchiveManager().getJsonInfo();
-    if (!historyArchiveInfo.empty())
-    {
-        info["history"] = historyArchiveInfo;
-    }
+    info["history_failure_rate"] =
+        fmt::format("{:.2}", getHistoryArchiveManager().getFailureRate());
 
     return root;
 }
@@ -292,10 +283,6 @@ ApplicationImpl::getNetworkID() const
 ApplicationImpl::~ApplicationImpl()
 {
     LOG(INFO) << "Application destructing";
-    if (mNtpSynchronizationChecker)
-    {
-        mNtpSynchronizationChecker->shutdown();
-    }
     if (mProcessManager)
     {
         mProcessManager->shutdown();
@@ -355,6 +342,8 @@ ApplicationImpl::start()
         throw std::invalid_argument(err);
     }
 
+    mConfig.logBasicInfo();
+
     bool done = false;
     mLedgerManager->loadLastKnownLedger(
         [this, &done](asio::error_code const& ec) {
@@ -398,11 +387,6 @@ ApplicationImpl::start()
             done = true;
         });
 
-    if (mNtpSynchronizationChecker)
-    {
-        mNtpSynchronizationChecker->start();
-    }
-
     while (!done && mVirtualClock.crank(true))
         ;
 }
@@ -424,10 +408,6 @@ ApplicationImpl::gracefulStop()
     if (mOverlayManager)
     {
         mOverlayManager->shutdown();
-    }
-    if (mNtpSynchronizationChecker)
-    {
-        mNtpSynchronizationChecker->shutdown();
     }
     if (mProcessManager)
     {
@@ -527,7 +507,12 @@ Application::State
 ApplicationImpl::getState() const
 {
     State s;
-    if (mStopping)
+
+    if (!mStarted)
+    {
+        s = APP_CREATED_STATE;
+    }
+    else if (mStopping)
     {
         s = APP_STOPPING_STATE;
     }
@@ -632,7 +617,7 @@ ApplicationImpl::clearMetrics(std::string const& domain)
 TmpDirManager&
 ApplicationImpl::getTmpDirManager()
 {
-    return *mTmpDirManager;
+    return getBucketManager().getTmpDirManager();
 }
 
 LedgerManager&
@@ -744,21 +729,39 @@ ApplicationImpl::getWorkerIOService()
 }
 
 void
-ApplicationImpl::postOnMainThread(std::function<void()>&& f)
+ApplicationImpl::postOnMainThread(std::function<void()>&& f,
+                                  std::string jobName)
 {
-    mVirtualClock.postToCurrentCrank(std::move(f));
+    LogSlowExecution isSlow{std::move(jobName), LogSlowExecution::Mode::MANUAL,
+                            "executed after"};
+    mVirtualClock.postToCurrentCrank([ this, f = std::move(f), isSlow ]() {
+        mPostOnMainThreadDelay.Update(isSlow.checkElapsedTime());
+        f();
+    });
 }
 
 void
-ApplicationImpl::postOnMainThreadWithDelay(std::function<void()>&& f)
+ApplicationImpl::postOnMainThreadWithDelay(std::function<void()>&& f,
+                                           std::string jobName)
 {
-    mVirtualClock.postToNextCrank(std::move(f));
+    LogSlowExecution isSlow{std::move(jobName), LogSlowExecution::Mode::MANUAL,
+                            "executed after"};
+    mVirtualClock.postToNextCrank([ this, f = std::move(f), isSlow ]() {
+        mPostOnMainThreadWithDelayDelay.Update(isSlow.checkElapsedTime());
+        f();
+    });
 }
 
 void
-ApplicationImpl::postOnBackgroundThread(std::function<void()>&& f)
+ApplicationImpl::postOnBackgroundThread(std::function<void()>&& f,
+                                        std::string jobName)
 {
-    getWorkerIOService().post(std::move(f));
+    LogSlowExecution isSlow{std::move(jobName), LogSlowExecution::Mode::MANUAL,
+                            "executed after"};
+    getWorkerIOService().post([ this, f = std::move(f), isSlow ]() {
+        mPostOnBackgroundThreadDelay.Update(isSlow.checkElapsedTime());
+        f();
+    });
 }
 
 void
@@ -788,10 +791,10 @@ ApplicationImpl::createOverlayManager()
     return OverlayManager::create(*this);
 }
 
-LedgerStateRoot&
-ApplicationImpl::getLedgerStateRoot()
+LedgerTxnRoot&
+ApplicationImpl::getLedgerTxnRoot()
 {
     assertThreadIsMain();
-    return *mLedgerStateRoot;
+    return *mLedgerTxnRoot;
 }
 }

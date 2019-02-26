@@ -29,8 +29,6 @@
 
 using namespace stellar;
 
-typedef std::unique_ptr<Application> appPtr;
-
 // Simulation tests. Some of the tests in this suite are long.
 // They are marked with [long][!hide]. Run the day-to-day tests with
 //
@@ -498,7 +496,7 @@ TEST_CASE("Accounts vs latency", "[scalability][!hide]")
     auto& app = *appPtr;
 
     auto& lg = app.getLoadGenerator();
-    auto& txtime = app.getMetrics().NewTimer({"transaction", "op", "apply"});
+    auto& txtime = app.getMetrics().NewTimer({"ledger", "operation", "apply"});
     uint32_t numItems = 500000;
 
     // Create accounts
@@ -593,7 +591,8 @@ TEST_CASE("Mesh nodes vs network traffic", "[scalability][!hide]")
             [&](int cfgNum) -> Config {
                 Config res = getTestConfig(cfgNum);
                 res.ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING = true;
-                res.MAX_PEER_CONNECTIONS = 1000;
+                res.TARGET_PEER_CONNECTIONS = 1000;
+                res.MAX_ADDITIONAL_PEER_CONNECTIONS = 1000;
                 return res;
             });
     });
@@ -608,7 +607,8 @@ TEST_CASE("Cycle nodes vs network traffic", "[scalability][!hide]")
             [](int cfgCount) -> Config {
                 Config res = getTestConfig(cfgCount);
                 res.ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING = true;
-                res.MAX_PEER_CONNECTIONS = 1000;
+                res.TARGET_PEER_CONNECTIONS = 1000;
+                res.MAX_ADDITIONAL_PEER_CONNECTIONS = 1000;
                 return res;
             });
     });
@@ -623,7 +623,8 @@ TEST_CASE("Branched cycle nodes vs network traffic", "[scalability][!hide]")
             [](int cfgCount) -> Config {
                 Config res = getTestConfig(cfgCount);
                 res.ARTIFICIALLY_ACCELERATE_TIME_FOR_TESTING = true;
-                res.MAX_PEER_CONNECTIONS = 1000;
+                res.TARGET_PEER_CONNECTIONS = 1000;
+                res.MAX_ADDITIONAL_PEER_CONNECTIONS = 1000;
                 return res;
             });
     });

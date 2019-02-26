@@ -81,9 +81,10 @@ Config::Config() : NODE_SEED(SecretKey::random())
     HTTP_MAX_CLIENT = 128;
     PEER_PORT = DEFAULT_PEER_PORT;
     TARGET_PEER_CONNECTIONS = 8;
-    MAX_ADDITIONAL_PEER_CONNECTIONS = -1;
-    MAX_PEER_CONNECTIONS = 12;
     MAX_PENDING_CONNECTIONS = 500;
+    MAX_ADDITIONAL_PEER_CONNECTIONS = -1;
+    MAX_OUTBOUND_PENDING_CONNECTIONS = 0;
+    MAX_INBOUND_PENDING_CONNECTIONS = 0;
     PEER_AUTHENTICATION_TIMEOUT = 2;
     PEER_TIMEOUT = 30;
     PREFERRED_PEERS_ONLY = false;
@@ -94,7 +95,6 @@ Config::Config() : NODE_SEED(SecretKey::random())
     NODE_IS_VALIDATOR = false;
 
     DATABASE = SecretValue{"sqlite3://:memory:"};
-    NTP_SERVER = "pool.ntp.org";
 
     ENTRY_CACHE_SIZE = 4096;
     BEST_OFFERS_CACHE_SIZE = 64;
@@ -255,6 +255,7 @@ Config::load(std::string const& filename)
     }
 
     LOG(DEBUG) << "Loading config from: " << filename;
+
     try
     {
         cpptoml::toml_group g;
@@ -287,15 +288,15 @@ Config::load(std::string const& filename)
 
             if (item.first == "PEER_PORT")
             {
-                PEER_PORT = readInt<unsigned short>(item, 1, UINT16_MAX);
+                PEER_PORT = readInt<unsigned short>(item, 1);
             }
             else if (item.first == "HTTP_PORT")
             {
-                HTTP_PORT = readInt<unsigned short>(item, 1, UINT16_MAX);
+                HTTP_PORT = readInt<unsigned short>(item, 1);
             }
             else if (item.first == "HTTP_MAX_CLIENT")
             {
-                HTTP_MAX_CLIENT = readInt<unsigned short>(item, 0, UINT16_MAX);
+                HTTP_MAX_CLIENT = readInt<unsigned short>(item, 0);
             }
             else if (item.first == "PUBLIC_HTTP_PORT")
             {
@@ -399,28 +400,25 @@ Config::load(std::string const& filename)
             {
                 TARGET_PEER_CONNECTIONS = readInt<unsigned short>(item, 1);
             }
-            else if (item.first == "MAX_PEER_CONNECTIONS")
-            {
-                MAX_PEER_CONNECTIONS = readInt<unsigned short>(item, 1);
-            }
             else if (item.first == "MAX_ADDITIONAL_PEER_CONNECTIONS")
             {
-                MAX_ADDITIONAL_PEER_CONNECTIONS =
-                    readInt<int>(item, -1, UINT16_MAX);
+                MAX_ADDITIONAL_PEER_CONNECTIONS = readInt<int>(
+                    item, -1, std::numeric_limits<unsigned short>::max());
             }
             else if (item.first == "MAX_PENDING_CONNECTIONS")
             {
-                MAX_PENDING_CONNECTIONS =
-                    readInt<unsigned short>(item, 1, UINT16_MAX);
+                MAX_PENDING_CONNECTIONS = readInt<unsigned short>(
+                    item, 1, std::numeric_limits<unsigned short>::max());
             }
             else if (item.first == "PEER_AUTHENTICATION_TIMEOUT")
             {
-                PEER_AUTHENTICATION_TIMEOUT =
-                    readInt<unsigned short>(item, 1, UINT16_MAX);
+                PEER_AUTHENTICATION_TIMEOUT = readInt<unsigned short>(
+                    item, 1, std::numeric_limits<unsigned short>::max());
             }
             else if (item.first == "PEER_TIMEOUT")
             {
-                PEER_TIMEOUT = readInt<unsigned short>(item, 1, UINT16_MAX);
+                PEER_TIMEOUT = readInt<unsigned short>(
+                    item, 1, std::numeric_limits<unsigned short>::max());
             }
             else if (item.first == "PREFERRED_PEERS")
             {
@@ -511,10 +509,6 @@ Config::load(std::string const& filename)
             {
                 NETWORK_PASSPHRASE = readString(item);
             }
-            else if (item.first == "NTP_SERVER")
-            {
-                NTP_SERVER = readString(item);
-            }
             else if (item.first == "INVARIANT_CHECKS")
             {
                 INVARIANT_CHECKS = readStringArray(item);
@@ -559,32 +553,8 @@ Config::load(std::string const& filename)
                 loadQset(qset->as_group(), QUORUM_SET, 0);
             }
         }
-        if (MAX_ADDITIONAL_PEER_CONNECTIONS < 0)
-        {
-            MAX_ADDITIONAL_PEER_CONNECTIONS = TARGET_PEER_CONNECTIONS;
-        }
-        if (MAX_ADDITIONAL_PEER_CONNECTIONS >
-            (UINT16_MAX - TARGET_PEER_CONNECTIONS))
-        {
-            throw std::invalid_argument(
-                "invalid MAX_ADDITIONAL_PEER_CONNECTIONS");
-        }
-        MAX_PEER_CONNECTIONS = std::max(
-            MAX_PEER_CONNECTIONS,
-            static_cast<unsigned short>(MAX_ADDITIONAL_PEER_CONNECTIONS +
-                                        TARGET_PEER_CONNECTIONS));
 
-        // ensure that max pending connections is not above what the system
-        // supports
-        MAX_PENDING_CONNECTIONS = static_cast<unsigned short>(
-            std::min<int>(MAX_PENDING_CONNECTIONS, fs::getMaxConnections()));
-
-        // enforce TARGET_PEER_CONNECTIONS <= MAX_PEER_CONNECTIONS <=
-        // MAX_PENDING_CONNECTIONS
-        MAX_PEER_CONNECTIONS =
-            std::min(MAX_PEER_CONNECTIONS, MAX_PENDING_CONNECTIONS);
-        TARGET_PEER_CONNECTIONS =
-            std::min(TARGET_PEER_CONNECTIONS, MAX_PEER_CONNECTIONS);
+        adjust();
         validateConfig();
     }
     catch (cpptoml::toml_parse_exception& ex)
@@ -595,6 +565,110 @@ Config::load(std::string const& filename)
         err += ex.what();
         throw std::invalid_argument(err);
     }
+}
+
+void
+Config::adjust()
+{
+    if (MAX_ADDITIONAL_PEER_CONNECTIONS == -1)
+    {
+        if (TARGET_PEER_CONNECTIONS <=
+            std::numeric_limits<unsigned short>::max() / 8)
+        {
+            MAX_ADDITIONAL_PEER_CONNECTIONS = TARGET_PEER_CONNECTIONS * 8;
+        }
+        else
+        {
+            MAX_ADDITIONAL_PEER_CONNECTIONS =
+                std::numeric_limits<unsigned short>::max();
+        }
+    }
+
+    int maxFsConnections = std::min<int>(
+        std::numeric_limits<unsigned short>::max(), fs::getMaxConnections());
+
+    auto totalRequiredConnections = TARGET_PEER_CONNECTIONS +
+                                    MAX_ADDITIONAL_PEER_CONNECTIONS +
+                                    MAX_PENDING_CONNECTIONS;
+
+    auto totalAuthenticatedConnections =
+        TARGET_PEER_CONNECTIONS + MAX_ADDITIONAL_PEER_CONNECTIONS;
+    if (totalAuthenticatedConnections > 0 && totalRequiredConnections > 0)
+    {
+        auto outboundPendingRate =
+            double(TARGET_PEER_CONNECTIONS) / totalAuthenticatedConnections;
+
+        auto doubleToNonzeroUnsignedShort = [](double v) {
+            auto rounded = static_cast<int>(std::ceil(v));
+            auto cappedToUnsignedShort = std::min<int>(
+                std::numeric_limits<unsigned short>::max(), rounded);
+            return static_cast<unsigned short>(
+                std::max<int>(1, cappedToUnsignedShort));
+        };
+
+        if (totalRequiredConnections > maxFsConnections)
+        {
+            auto outboundRate =
+                (double)TARGET_PEER_CONNECTIONS / totalRequiredConnections;
+            auto inboundRate = (double)MAX_ADDITIONAL_PEER_CONNECTIONS /
+                               totalRequiredConnections;
+
+            TARGET_PEER_CONNECTIONS =
+                doubleToNonzeroUnsignedShort(maxFsConnections * outboundRate);
+            MAX_ADDITIONAL_PEER_CONNECTIONS =
+                doubleToNonzeroUnsignedShort(maxFsConnections * inboundRate);
+
+            auto authenticatedConnections =
+                TARGET_PEER_CONNECTIONS + MAX_ADDITIONAL_PEER_CONNECTIONS;
+            MAX_PENDING_CONNECTIONS =
+                authenticatedConnections >= maxFsConnections
+                    ? 1
+                    : static_cast<unsigned short>(maxFsConnections -
+                                                  authenticatedConnections);
+        }
+
+        // allow setting own values for testing purposes
+        if (MAX_OUTBOUND_PENDING_CONNECTIONS == 0 &&
+            MAX_INBOUND_PENDING_CONNECTIONS == 0)
+        {
+            if (TARGET_PEER_CONNECTIONS <=
+                std::numeric_limits<unsigned short>::max() / 2)
+            {
+                MAX_OUTBOUND_PENDING_CONNECTIONS = TARGET_PEER_CONNECTIONS * 2;
+            }
+            else
+            {
+                MAX_OUTBOUND_PENDING_CONNECTIONS =
+                    std::numeric_limits<unsigned short>::max();
+            }
+
+            MAX_OUTBOUND_PENDING_CONNECTIONS =
+                std::min(MAX_OUTBOUND_PENDING_CONNECTIONS,
+                         doubleToNonzeroUnsignedShort(MAX_PENDING_CONNECTIONS *
+                                                      outboundPendingRate));
+            MAX_INBOUND_PENDING_CONNECTIONS = std::max<unsigned short>(
+                1, MAX_PENDING_CONNECTIONS - MAX_OUTBOUND_PENDING_CONNECTIONS);
+        }
+    }
+    else
+    {
+        MAX_OUTBOUND_PENDING_CONNECTIONS = 0;
+        MAX_INBOUND_PENDING_CONNECTIONS = 0;
+    }
+}
+
+void
+Config::logBasicInfo()
+{
+    LOG(INFO) << "Connection effective settings:";
+    LOG(INFO) << "TARGET_PEER_CONNECTIONS: " << TARGET_PEER_CONNECTIONS;
+    LOG(INFO) << "MAX_ADDITIONAL_PEER_CONNECTIONS: "
+              << MAX_ADDITIONAL_PEER_CONNECTIONS;
+    LOG(INFO) << "MAX_PENDING_CONNECTIONS: " << MAX_PENDING_CONNECTIONS;
+    LOG(INFO) << "MAX_OUTBOUND_PENDING_CONNECTIONS: "
+              << MAX_OUTBOUND_PENDING_CONNECTIONS;
+    LOG(INFO) << "MAX_INBOUND_PENDING_CONNECTIONS: "
+              << MAX_INBOUND_PENDING_CONNECTIONS;
 }
 
 void

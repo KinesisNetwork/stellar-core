@@ -36,6 +36,7 @@ class Bucket : public std::enable_shared_from_this<Bucket>,
 
     std::string const mFilename;
     Hash const mHash;
+    size_t mSize{0};
 
   public:
     // Create an empty bucket. The empty bucket has hash '000000...' and its
@@ -49,6 +50,7 @@ class Bucket : public std::enable_shared_from_this<Bucket>,
 
     Hash const& getHash() const;
     std::string const& getFilename() const;
+    size_t getSize() const;
 
     // Returns true if a BucketEntry that is key-wise identical to the given
     // BucketEntry exists in the bucket. For testing.
@@ -57,6 +59,11 @@ class Bucket : public std::enable_shared_from_this<Bucket>,
     // Return the count of live and dead BucketEntries in the bucket. For
     // testing.
     std::pair<size_t, size_t> countLiveAndDeadEntries() const;
+
+    static std::vector<BucketEntry>
+    convertToBucketEntry(std::vector<LedgerEntry> const& liveEntries);
+    static std::vector<BucketEntry>
+    convertToBucketEntry(std::vector<LedgerKey> const& deadEntries);
 
     // "Applies" the bucket to the database. For each entry in the bucket, if
     // the entry is live, creates or updates the corresponding entry in the

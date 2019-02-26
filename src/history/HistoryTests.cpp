@@ -2,6 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
+#include "FileTransferInfo.h"
 #include "bucket/BucketManager.h"
 #include "catchup/CatchupWorkTests.h"
 #include "history/HistoryArchiveManager.h"
@@ -20,11 +21,49 @@
 #include "util/Fs.h"
 #include "work/WorkManager.h"
 
+#include "historywork/DownloadBucketsWork.h"
 #include <lib/catch.hpp>
 #include <lib/util/format.h>
 
 using namespace stellar;
 using namespace historytestutils;
+
+namespace historytests
+{
+class TestBatchWork : public BatchWork
+{
+  public:
+    int mCount{0};
+
+    TestBatchWork(Application& app, WorkParent& parent,
+                  std::string const& uniqueName)
+        : BatchWork(app, parent, uniqueName)
+    {
+    }
+
+  protected:
+    bool
+    hasNext() override
+    {
+        return mCount < mApp.getConfig().MAX_CONCURRENT_SUBPROCESSES * 2;
+    }
+
+    void
+    resetIter() override
+    {
+        mCount = 0;
+    }
+
+    std::string
+    yieldMoreWork() override
+    {
+        return addWork<Work>(fmt::format("child-{:d}", mCount++), 0)
+            ->getUniqueName();
+    }
+};
+}
+
+using namespace historytests;
 
 TEST_CASE("next checkpoint ledger", "[history]")
 {
@@ -183,6 +222,8 @@ TEST_CASE("History publish queueing", "[history][historydelay][historycatchup]")
     // One more ledger is needed to close as stellar-core only publishes to
     // just-before-LCL
     catchupSimulation.generateRandomLedger();
+    // And one more to trigger catchup
+    catchupSimulation.generateRandomLedger();
 
     while (hm.getPublishSuccessCount() < hm.getPublishQueueCount())
     {
@@ -192,7 +233,7 @@ TEST_CASE("History publish queueing", "[history][historydelay][historycatchup]")
 
     auto initLedger =
         catchupSimulation.getApp().getLedgerManager().getLastClosedLedgerNum() -
-        1;
+        2;
     auto app2 = catchupSimulation.catchupNewApplication(
         initLedger, std::numeric_limits<uint32_t>::max(), false,
         Config::TESTDB_IN_MEMORY_SQLITE,
@@ -200,6 +241,216 @@ TEST_CASE("History publish queueing", "[history][historydelay][historycatchup]")
     CHECK(
         app2->getLedgerManager().getLastClosedLedgerNum() ==
         catchupSimulation.getApp().getLedgerManager().getLastClosedLedgerNum());
+}
+
+TEST_CASE("History bucket verification",
+          "[history][bucketverification][batching]")
+{
+    /* Tests bucket verification stage of catchup. Assumes ledger chain
+     * verification was successful. **/
+
+    Config cfg(getTestConfig());
+    VirtualClock clock;
+    auto cg = std::make_shared<TmpDirHistoryConfigurator>();
+    cg->configure(cfg, true);
+    Application::pointer app = createTestApplication(clock, cfg);
+    CHECK(app->getHistoryArchiveManager().initializeHistoryArchive("test"));
+
+    auto bucketGenerator = TestBucketGenerator{
+        *app, app->getHistoryArchiveManager().getHistoryArchive("test")};
+    std::vector<std::string> hashes;
+    auto& wm = app->getWorkManager();
+    std::map<std::string, std::shared_ptr<Bucket>> mBuckets;
+    auto tmpDir =
+        std::make_unique<TmpDir>(app->getTmpDirManager().tmpDir("bucket-test"));
+
+    // Helper for failed cases
+    auto downloadStatusCheck = [](DownloadBucketsWork& parent, bool success) {
+        for (auto const& child : parent.getChildren())
+        {
+            REQUIRE(child.second->getState() == Work::WORK_FAILURE_RAISE);
+            if (success)
+            {
+                REQUIRE(child.second->allChildrenSuccessful());
+            }
+            else
+            {
+                REQUIRE_FALSE(child.second->allChildrenSuccessful());
+            }
+        }
+    };
+
+    SECTION("successful download and verify")
+    {
+        hashes.push_back(bucketGenerator.generateBucket(
+            TestBucketState::CONTENTS_AND_HASH_OK));
+        hashes.push_back(bucketGenerator.generateBucket(
+            TestBucketState::CONTENTS_AND_HASH_OK));
+        auto verify =
+            wm.executeWork<DownloadBucketsWork>(mBuckets, hashes, *tmpDir);
+        REQUIRE(verify->getState() == Work::WORK_SUCCESS);
+    }
+    SECTION("download fails file not found")
+    {
+        hashes.push_back(
+            bucketGenerator.generateBucket(TestBucketState::FILE_NOT_UPLOADED));
+
+        auto verify =
+            wm.executeWork<DownloadBucketsWork>(mBuckets, hashes, *tmpDir);
+        REQUIRE(verify->getState() == Work::WORK_FAILURE_RAISE);
+        downloadStatusCheck(*verify, false);
+    }
+    SECTION("download succeeds but unzip fails")
+    {
+        hashes.push_back(bucketGenerator.generateBucket(
+            TestBucketState::CORRUPTED_ZIPPED_FILE));
+
+        auto verify =
+            wm.executeWork<DownloadBucketsWork>(mBuckets, hashes, *tmpDir);
+        REQUIRE(verify->getState() == Work::WORK_FAILURE_RAISE);
+        downloadStatusCheck(*verify, false);
+    }
+    SECTION("verify fails hash mismatch")
+    {
+        hashes.push_back(
+            bucketGenerator.generateBucket(TestBucketState::HASH_MISMATCH));
+
+        auto verify =
+            wm.executeWork<DownloadBucketsWork>(mBuckets, hashes, *tmpDir);
+        REQUIRE(verify->getState() == Work::WORK_FAILURE_RAISE);
+        downloadStatusCheck(*verify, true);
+    }
+    SECTION("no hashes to verify")
+    {
+        // Ensure proper behavior when no hashes are passed in
+        auto verify = wm.executeWork<DownloadBucketsWork>(
+            mBuckets, std::vector<std::string>(), *tmpDir);
+        REQUIRE(verify->getState() == Work::WORK_SUCCESS);
+    }
+}
+
+TEST_CASE("Work batching", "[batching]")
+{
+    VirtualClock clock;
+    Application::pointer app = createTestApplication(clock, getTestConfig());
+    auto& wm = app->getWorkManager();
+
+    auto verify = wm.addWork<TestBatchWork>("test-batch");
+    wm.advanceChildren();
+    while (!clock.getIOService().stopped() && !wm.allChildrenDone())
+    {
+        clock.crank(true);
+        REQUIRE(verify->getChildren().size() <=
+                app->getConfig().MAX_CONCURRENT_SUBPROCESSES);
+    }
+    REQUIRE(verify->getState() == Work::WORK_SUCCESS);
+}
+
+TEST_CASE("Ledger chain verification", "[ledgerheaderverification]")
+{
+    Config cfg(getTestConfig(0));
+    VirtualClock clock;
+    auto cg = std::make_shared<TmpDirHistoryConfigurator>();
+    cg->configure(cfg, true);
+    Application::pointer app = createTestApplication(clock, cfg);
+    CHECK(app->getHistoryArchiveManager().initializeHistoryArchive("test"));
+
+    auto tmpDir = app->getTmpDirManager().tmpDir("tmp-chain-test");
+    auto& wm = app->getWorkManager();
+
+    LedgerHeaderHistoryEntry firstVerified{};
+    LedgerHeaderHistoryEntry verifiedAhead{};
+
+    uint32_t initLedger = 127;
+    LedgerRange ledgerRange{
+        initLedger,
+        initLedger + app->getHistoryManager().getCheckpointFrequency() * 10};
+    CheckpointRange checkpointRange{ledgerRange, app->getHistoryManager()};
+    auto ledgerChainGenerator = TestLedgerChainGenerator{
+        *app, app->getHistoryArchiveManager().getHistoryArchive("test"),
+        checkpointRange, tmpDir};
+
+    auto checkExpectedBehavior = [&](Work::State expectedState,
+                                     LedgerHeaderHistoryEntry lcl,
+                                     LedgerHeaderHistoryEntry last) {
+        auto lclPair = LedgerNumHashPair(lcl.header.ledgerSeq,
+                                         make_optional<Hash>(lcl.hash));
+        auto ledgerRangeEnd = LedgerNumHashPair(last.header.ledgerSeq,
+                                                make_optional<Hash>(last.hash));
+        auto w = wm.executeWork<VerifyLedgerChainWork>(tmpDir, ledgerRange,
+                                                       lclPair, ledgerRangeEnd);
+        REQUIRE(expectedState == w->getState());
+    };
+
+    LedgerHeaderHistoryEntry lcl, last;
+    SECTION("fully valid")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_OK);
+        checkExpectedBehavior(Work::WORK_SUCCESS, lcl, last);
+    }
+    SECTION("invalid link due to bad hash")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_ERR_BAD_HASH);
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("invalid ledger version")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_ERR_BAD_LEDGER_VERSION);
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("overshot")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_ERR_OVERSHOT);
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("undershot")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_ERR_UNDERSHOT);
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("missing entries")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_ERR_MISSING_ENTRIES);
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("chain does not agree with LCL")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_OK);
+        lcl.hash = HashUtils::random();
+
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("chain does not agree with LCL on checkpoint boundary")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_OK);
+        lcl.header.ledgerSeq +=
+            app->getHistoryManager().getCheckpointFrequency() - 1;
+        lcl.hash = HashUtils::random();
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("chain does not agree with LCL outside of range")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_OK);
+        lcl.header.ledgerSeq -= 1;
+        lcl.hash = HashUtils::random();
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
+    SECTION("chain does not agree with trusted hash")
+    {
+        std::tie(lcl, last) = ledgerChainGenerator.makeLedgerChainFiles(
+            HistoryManager::VERIFY_STATUS_OK);
+        last.hash = HashUtils::random();
+        checkExpectedBehavior(Work::WORK_FAILURE_FATAL, lcl, last);
+    }
 }
 
 TEST_CASE("History prefix catchup", "[history][historycatchup][prefixcatchup]")
@@ -266,9 +517,10 @@ TEST_CASE("Publish catchup alternation with stall",
 
         initLedger = lm.getLastClosedLedgerNum() - 2;
 
-        catchupSimulation.catchupApplication(
-            initLedger, std::numeric_limits<uint32_t>::max(), false, app2);
-        catchupSimulation.catchupApplication(initLedger, 0, false, app3);
+        REQUIRE(catchupSimulation.catchupApplication(
+            initLedger, std::numeric_limits<uint32_t>::max(), false, app2));
+        REQUIRE(
+            catchupSimulation.catchupApplication(initLedger, 0, false, app3));
 
         CHECK(app2->getLedgerManager().getLastClosedLedgerNum() ==
               lm.getLastClosedLedgerNum());
@@ -486,8 +738,7 @@ TEST_CASE("too far behind catchup restart", "[history][catchupstall]")
     // Now start a catchup on that catchups as far as it can due to gap
     LOG(INFO) << "Starting catchup (with gap) from " << init;
     REQUIRE(catchupSimulation.catchupApplication(
-        init, std::numeric_limits<uint32_t>::max(), false, app2, true,
-        init + 10));
+        init, std::numeric_limits<uint32_t>::max(), false, app2, init + 10));
     REQUIRE(app2->getLedgerManager().getLastClosedLedgerNum() == 76);
 
     app2->getWorkManager().clearChildren();
@@ -545,10 +796,10 @@ TEST_CASE("Catchup recent", "[history][catchuprecent]")
 
     for (auto a : apps)
     {
-        catchupSimulation.catchupApplication(initLedger, 80, false, a);
+        REQUIRE(catchupSimulation.catchupApplication(initLedger, 80, false, a));
     }
 
-    // Now push network along a _lot_ futher along see that they can all
+    // Now push network along a _lot_ further along see that they can all
     // still catch up properly.
     catchupSimulation.generateAndPublishHistory(25);
     initLedger =
@@ -557,7 +808,7 @@ TEST_CASE("Catchup recent", "[history][catchuprecent]")
 
     for (auto a : apps)
     {
-        catchupSimulation.catchupApplication(initLedger, 80, false, a);
+        REQUIRE(catchupSimulation.catchupApplication(initLedger, 80, false, a));
     }
 }
 
@@ -601,10 +852,12 @@ TEST_CASE("Catchup manual", "[history][catchupmanual]")
                     configuration.toLedger(), configuration.count(), true,
                     dbMode, name);
                 // manual catchup-complete to first checkpoint
-                catchupSimulation.catchupApplication(
-                    initLedger1, std::numeric_limits<uint32_t>::max(), true, a);
+                REQUIRE(catchupSimulation.catchupApplication(
+                    initLedger1, std::numeric_limits<uint32_t>::max(), true,
+                    a));
                 // manual catchup-complete to second checkpoint
-                catchupSimulation.catchupApplication(initLedger2, 80, false, a);
+                REQUIRE(catchupSimulation.catchupApplication(initLedger2, 80,
+                                                             false, a));
             }
         }
     }

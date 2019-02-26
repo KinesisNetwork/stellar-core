@@ -3,14 +3,16 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "util/types.h"
+#include "lib/util/format.h"
 #include "lib/util/uint128_t.h"
 #include "util/XDROperators.h"
+
 #include <algorithm>
+#include <limits>
 #include <locale>
 
 namespace stellar
 {
-static std::locale cLocale("C");
 
 LedgerKey
 LedgerEntryKey(LedgerEntry const& e)
@@ -80,9 +82,10 @@ lessThanXored(Hash const& l, Hash const& r, Hash const& x)
 bool
 isString32Valid(std::string const& str)
 {
+    auto& loc = std::locale::classic();
     for (auto c : str)
     {
-        if (c < 0 || std::iscntrl(c, cLocale))
+        if (c < 0 || std::iscntrl(c, loc))
         {
             return false;
         }
@@ -96,6 +99,7 @@ isAssetValid(Asset const& cur)
     if (cur.type() == ASSET_TYPE_NATIVE)
         return true;
 
+    auto& loc = std::locale::classic();
     if (cur.type() == ASSET_TYPE_CREDIT_ALPHANUM4)
     {
         auto const& code = cur.alphaNum4().assetCode;
@@ -114,7 +118,7 @@ isAssetValid(Asset const& cur)
             }
             else
             {
-                if (b > 0x7F || !std::isalnum((char)b, cLocale))
+                if (b > 0x7F || !std::isalnum((char)b, loc))
                 {
                     return false;
                 }
@@ -142,7 +146,7 @@ isAssetValid(Asset const& cur)
             }
             else
             {
-                if (b > 0x7F || !std::isalnum((char)b, cLocale))
+                if (b > 0x7F || !std::isalnum((char)b, loc))
                 {
                     return false;
                 }
@@ -185,6 +189,38 @@ compareAsset(Asset const& first, Asset const& second)
             return true;
     }
     return false;
+}
+
+int32_t
+unsignedToSigned(uint32_t v)
+{
+    if (v > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
+        throw std::runtime_error("unsigned-to-signed overflow");
+    return static_cast<int32_t>(v);
+}
+
+int64_t
+unsignedToSigned(uint64_t v)
+{
+    if (v > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        throw std::runtime_error("unsigned-to-signed overflow");
+    return static_cast<int64_t>(v);
+}
+
+std::string
+formatSize(size_t size)
+{
+    const std::vector<std::string> suffixes = {"B", "KB", "MB", "GB"};
+    double dsize = static_cast<double>(size);
+
+    auto i = 0;
+    while (dsize >= 1024 && i < suffixes.size() - 1)
+    {
+        dsize /= 1024;
+        i++;
+    }
+
+    return fmt::format("{:.2f}{}", dsize, suffixes[i]);
 }
 
 bool

@@ -41,7 +41,7 @@ class CommandHandler;
 class WorkManager;
 class BanManager;
 class StatusManager;
-class LedgerStateRoot;
+class LedgerTxnRoot;
 
 class Application;
 void validateNetworkPassphrase(std::shared_ptr<Application> app);
@@ -129,8 +129,8 @@ class Application
     // certain subsystem responses to IO events, timers etc.
     enum State
     {
-        // Loading state from database, not yet active. SCP is inhibited.
-        APP_BOOTING_STATE,
+        // Application created, but not started
+        APP_CREATED_STATE,
 
         // Out of sync with SCP peers
         APP_ACQUIRING_CONSENSUS_STATE,
@@ -214,9 +214,12 @@ class Application
     // with caution.
     virtual asio::io_service& getWorkerIOService() = 0;
 
-    virtual void postOnMainThread(std::function<void()>&& f) = 0;
-    virtual void postOnMainThreadWithDelay(std::function<void()>&& f) = 0;
-    virtual void postOnBackgroundThread(std::function<void()>&& f) = 0;
+    virtual void postOnMainThread(std::function<void()>&& f,
+                                  std::string jobName) = 0;
+    virtual void postOnMainThreadWithDelay(std::function<void()>&& f,
+                                           std::string jobName) = 0;
+    virtual void postOnBackgroundThread(std::function<void()>&& f,
+                                        std::string jobName) = 0;
 
     // Perform actions necessary to transition from BOOTING_STATE to other
     // states. In particular: either reload or reinitialize the database, and
@@ -268,7 +271,7 @@ class Application
 
     virtual void newDB() = 0;
 
-    virtual LedgerStateRoot& getLedgerStateRoot() = 0;
+    virtual LedgerTxnRoot& getLedgerTxnRoot() = 0;
 
     // Factory: create a new Application object bound to `clock`, with a local
     // copy made of `cfg`.

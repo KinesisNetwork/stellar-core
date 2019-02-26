@@ -25,18 +25,10 @@ LoopbackPeer::LoopbackPeer(Application& app, PeerRole role) : Peer(app, role)
 {
 }
 
-PeerBareAddress
-LoopbackPeer::makeAddress(int remoteListeningPort) const
+std::string
+LoopbackPeer::getIP() const
 {
-    if (remoteListeningPort <= 0 || remoteListeningPort > UINT16_MAX)
-    {
-        return PeerBareAddress{};
-    }
-    else
-    {
-        return PeerBareAddress{
-            "127.0.0.1", static_cast<unsigned short>(remoteListeningPort)};
-    }
+    return "127.0.0.1";
 }
 
 AuthCert
@@ -55,7 +47,7 @@ LoopbackPeer::sendMessage(xdr::msg_ptr&& msg)
 {
     if (mRemote.expired())
     {
-        drop();
+        drop(Peer::DropMode::IGNORE_WRITE_QUEUE);
         return;
     }
 
@@ -76,17 +68,16 @@ LoopbackPeer::sendMessage(xdr::msg_ptr&& msg)
 }
 
 void
-LoopbackPeer::drop(ErrorCode err, std::string const& msg)
+LoopbackPeer::drop(ErrorCode err, std::string const& msg, DropMode mode)
 {
     if (mState != CLOSING)
     {
         mDropReason = msg;
     }
-    Peer::drop(err, msg);
+    Peer::drop(err, msg, mode);
 }
 
-void
-LoopbackPeer::drop(bool)
+void LoopbackPeer::drop(DropMode)
 {
     if (mState == CLOSING)
     {
@@ -94,12 +85,14 @@ LoopbackPeer::drop(bool)
     }
     mState = CLOSING;
     mIdleTimer.cancel();
-    getApp().getOverlayManager().dropPeer(this);
+    getApp().getOverlayManager().removePeer(this);
 
     auto remote = mRemote.lock();
     if (remote)
     {
-        remote->getApp().postOnMainThread([remote]() { remote->drop(); });
+        remote->getApp().postOnMainThread(
+            [remote]() { remote->drop(Peer::DropMode::IGNORE_WRITE_QUEUE); },
+            "LoopbackPeer: drop");
     }
 }
 
@@ -147,7 +140,8 @@ LoopbackPeer::processInQueue()
         if (!mInQueue.empty())
         {
             auto self = static_pointer_cast<LoopbackPeer>(shared_from_this());
-            mApp.postOnMainThread([self]() { self->processInQueue(); });
+            mApp.postOnMainThread([self]() { self->processInQueue(); },
+                                  "LoopbackPeer: processInQueue");
         }
     }
 }
@@ -213,7 +207,8 @@ LoopbackPeer::deliverOne()
             // move msg to remote's in queue
             remote->mInQueue.emplace(std::move(msg));
             remote->getApp().postOnMainThread(
-                [remote]() { remote->processInQueue(); });
+                [remote]() { remote->processInQueue(); },
+                "LoopbackPeer: processInQueue in deliverOne");
         }
         LoadManager::PeerContext loadCtx(mApp, mPeerID);
         mLastWrite = mApp.getClock().now();
@@ -382,8 +377,8 @@ LoopbackPeerConnection::LoopbackPeerConnection(Application& initiator,
     mAcceptor->mRemote = mInitiator;
     mAcceptor->mState = Peer::CONNECTED;
 
-    initiator.getOverlayManager().addPendingPeer(mInitiator);
-    acceptor.getOverlayManager().addPendingPeer(mAcceptor);
+    initiator.getOverlayManager().addOutboundConnection(mInitiator);
+    acceptor.getOverlayManager().addInboundConnection(mAcceptor);
 
     // if connection was dropped during addPendingPeer, we don't want do call
     // connectHandler
@@ -398,14 +393,15 @@ LoopbackPeerConnection::LoopbackPeerConnection(Application& initiator,
 
     auto init = mInitiator;
     mInitiator->getApp().postOnMainThread(
-        [init]() { init->connectHandler(asio::error_code()); });
+        [init]() { init->connectHandler(asio::error_code()); },
+        "LoopbackPeer: connect");
 }
 
 LoopbackPeerConnection::~LoopbackPeerConnection()
 {
     // NB: Dropping the peer from one side will automatically drop the
     // other.
-    mInitiator->drop();
+    mInitiator->drop(Peer::DropMode::IGNORE_WRITE_QUEUE);
 }
 
 std::shared_ptr<LoopbackPeer>
@@ -413,6 +409,7 @@ LoopbackPeerConnection::getInitiator() const
 {
     return mInitiator;
 }
+
 std::shared_ptr<LoopbackPeer>
 LoopbackPeerConnection::getAcceptor() const
 {

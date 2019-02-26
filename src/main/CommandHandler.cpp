@@ -7,8 +7,8 @@
 #include "crypto/KeyUtils.h"
 #include "herder/Herder.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
-#include "ledger/LedgerStateEntry.h"
+#include "ledger/LedgerTxn.h"
+#include "ledger/LedgerTxnEntry.h"
 #include "lib/http/server.hpp"
 #include "lib/json/json.h"
 #include "lib/util/format.h"
@@ -156,8 +156,8 @@ CommandHandler::testAcc(std::string const& params, std::string& retStr)
             key = getAccount(accName->second.c_str());
         }
 
-        LedgerState ls(mApp.getLedgerStateRoot());
-        auto acc = stellar::loadAccount(ls, key.getPublicKey());
+        LedgerTxn ltx(mApp.getLedgerTxnRoot());
+        auto acc = stellar::loadAccount(ltx, key.getPublicKey());
         if (acc)
         {
             auto const& ae = acc.current().data.account();
@@ -483,30 +483,40 @@ CommandHandler::peers(std::string const&, std::string& retStr)
 {
     Json::Value root;
 
-    root["pending_peers"];
-    int counter = 0;
-    for (auto peer : mApp.getOverlayManager().getPendingPeers())
-    {
-        root["pending_peers"][counter] = peer->toString();
+    auto& pendingPeers = root["pending_peers"];
+    auto addPendingPeers = [&](std::string const& direction,
+                               std::vector<Peer::pointer> const& peers) {
+        auto counter = 0;
+        auto& node = pendingPeers[direction];
+        for (auto const& peer : peers)
+        {
+            node[counter++] = peer->toString();
+        }
+    };
+    addPendingPeers("outbound",
+                    mApp.getOverlayManager().getOutboundPendingPeers());
+    addPendingPeers("inbound",
+                    mApp.getOverlayManager().getInboundPendingPeers());
 
-        counter++;
-    }
-
-    root["authenticated_peers"];
-    counter = 0;
-    for (auto peer : mApp.getOverlayManager().getAuthenticatedPeers())
-    {
-        root["authenticated_peers"][counter]["address"] =
-            peer.second->toString();
-        root["authenticated_peers"][counter]["ver"] =
-            peer.second->getRemoteVersion();
-        root["authenticated_peers"][counter]["olver"] =
-            (int)peer.second->getRemoteOverlayVersion();
-        root["authenticated_peers"][counter]["id"] =
-            mApp.getConfig().toStrKey(peer.first);
-
-        counter++;
-    }
+    auto& authenticatedPeers = root["authenticated_peers"];
+    auto addAuthenticatedPeers =
+        [&](std::string const& direction,
+            std::map<NodeID, Peer::pointer> const& peers) {
+            auto counter = 0;
+            auto& node = authenticatedPeers[direction];
+            for (auto const& peer : peers)
+            {
+                auto& peerNode = node[counter++];
+                peerNode["address"] = peer.second->toString();
+                peerNode["ver"] = peer.second->getRemoteVersion();
+                peerNode["olver"] = (int)peer.second->getRemoteOverlayVersion();
+                peerNode["id"] = mApp.getConfig().toStrKey(peer.first);
+            }
+        };
+    addAuthenticatedPeers(
+        "outbound", mApp.getOverlayManager().getOutboundAuthenticatedPeers());
+    addAuthenticatedPeers(
+        "inbound", mApp.getOverlayManager().getInboundAuthenticatedPeers());
 
     retStr = root.toStyledString();
 }
@@ -599,7 +609,8 @@ CommandHandler::connect(std::string const& params, std::string& retStr)
         str << peerP->second << ":" << portP->second;
         retStr = "Connect to: ";
         retStr += str.str();
-        mApp.getOverlayManager().connectTo(str.str());
+        mApp.getOverlayManager().connectTo(
+            PeerBareAddress::resolve(str.str(), mApp));
     }
     else
     {
@@ -625,7 +636,8 @@ CommandHandler::dropPeer(std::string const& params, std::string& retStr)
             auto peer = peers.find(n);
             if (peer != peers.end())
             {
-                mApp.getOverlayManager().dropPeer(peer->second.get());
+                peer->second->drop(ERR_MISC, "dropped by user",
+                                   Peer::DropMode::IGNORE_WRITE_QUEUE);
                 if (ban != retMap.end() && ban->second == "1")
                 {
                     retStr = "Drop and ban peer: ";

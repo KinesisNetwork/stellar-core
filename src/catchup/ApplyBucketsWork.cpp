@@ -13,7 +13,7 @@
 #include "history/HistoryArchive.h"
 #include "historywork/Progress.h"
 #include "invariant/InvariantManager.h"
-#include "ledger/LedgerState.h"
+#include "ledger/LedgerTxn.h"
 #include "main/Application.h"
 #include "util/format.h"
 #include <medida/meter.h>
@@ -30,6 +30,7 @@ ApplyBucketsWork::ApplyBucketsWork(
     , mBuckets(buckets)
     , mApplyState(applyState)
     , mApplying(false)
+    , mTotalSize(0)
     , mLevel(BucketList::kNumLevels - 1)
     , mBucketApplyStart(app.getMetrics().NewMeter(
           {"history", "bucket-apply", "start"}, "event"))
@@ -37,6 +38,7 @@ ApplyBucketsWork::ApplyBucketsWork(
           {"history", "bucket-apply", "success"}, "event"))
     , mBucketApplyFailure(app.getMetrics().NewMeter(
           {"history", "bucket-apply", "failure"}, "event"))
+    , mCounters(app.getClock().now())
 {
 }
 
@@ -65,6 +67,28 @@ ApplyBucketsWork::getBucket(std::string const& hash)
 void
 ApplyBucketsWork::onReset()
 {
+    mTotalBuckets = 0;
+    mAppliedBuckets = 0;
+    mAppliedEntries = 0;
+    mTotalSize = 0;
+    mAppliedSize = 0;
+    mLastAppliedSizeMb = 0;
+    mLastPos = 0;
+
+    auto addBucket = [this](std::shared_ptr<Bucket const> const& bucket) {
+        if (bucket->getSize() > 0)
+        {
+            mTotalBuckets++;
+            mTotalSize += bucket->getSize();
+        }
+    };
+
+    for (auto const& hsb : mApplyState.currentBuckets)
+    {
+        addBucket(getBucket(hsb.snap));
+        addBucket(getBucket(hsb.curr));
+    }
+
     mLevel = BucketList::kNumLevels - 1;
     mApplying = false;
     mSnapBucket.reset();
@@ -88,7 +112,7 @@ ApplyBucketsWork::onStart()
                                           mApplyState.currentLedger, mLevel)
                                     : BucketList::oldestLedgerInCurr(
                                           mApplyState.currentLedger, mLevel);
-        auto& lsRoot = mApp.getLedgerStateRoot();
+        auto& lsRoot = mApp.getLedgerTxnRoot();
         lsRoot.deleteObjectsModifiedOnOrAfterLedger(oldestLedger);
     }
 
@@ -123,19 +147,60 @@ ApplyBucketsWork::onRun()
     //    if there is nothing to be applied.
     if (mSnapApplicator)
     {
-        if (*mSnapApplicator)
-        {
-            mSnapApplicator->advance();
-        }
+        advance("snap", *mSnapApplicator);
     }
     else if (mCurrApplicator)
     {
-        if (*mCurrApplicator)
-        {
-            mCurrApplicator->advance();
-        }
+        advance("curr", *mCurrApplicator);
     }
     scheduleSuccess();
+}
+
+void
+ApplyBucketsWork::advance(std::string const& bucketName,
+                          BucketApplicator& applicator)
+{
+    if (!applicator)
+    {
+        return;
+    }
+
+    assert(mTotalSize != 0);
+    auto sz = applicator.advance(mCounters);
+    mAppliedEntries += sz;
+    mCounters.logDebug(bucketName, mLevel, mApp.getClock().now());
+
+    auto log = false;
+    if (applicator)
+    {
+        mAppliedSize += (applicator.pos() - mLastPos);
+        mLastPos = applicator.pos();
+    }
+    else
+    {
+        mAppliedSize += (applicator.size() - mLastPos);
+        mAppliedBuckets++;
+        mLastPos = 0;
+        log = true;
+        mCounters.logInfo(bucketName, mLevel, mApp.getClock().now());
+        mCounters.reset(mApp.getClock().now());
+    }
+
+    auto appliedSizeMb = mAppliedSize / 1024 / 1024;
+    if (appliedSizeMb > mLastAppliedSizeMb)
+    {
+        log = true;
+        mLastAppliedSizeMb = appliedSizeMb;
+    }
+
+    if (log)
+    {
+        CLOG(INFO, "Bucket")
+            << "Bucket-apply: " << mAppliedEntries << " entries in "
+            << formatSize(mAppliedSize) << "/" << formatSize(mTotalSize)
+            << " in " << mAppliedBuckets << "/" << mTotalBuckets << " files ("
+            << (100 * mAppliedSize / mTotalSize) << "%)";
+    }
 }
 
 Work::State

@@ -9,26 +9,50 @@
 
 class LogSlowExecution
 {
-
-    std::chrono::system_clock::time_point mStart;
-    std::string mName;
-    int mThresholdInMs;
-
   public:
-    LogSlowExecution(std::string eventName, int ms = 1000)
+    enum class Mode
+    {
+        AUTOMATIC_RAII,
+        MANUAL // In this mode, it is the caller's responsibility to check
+               // elapsed time
+    };
+
+    LogSlowExecution(
+        std::string eventName, Mode mode = Mode::AUTOMATIC_RAII,
+        std::string message = "hung for",
+        std::chrono::milliseconds threshold = std::chrono::seconds(1))
         : mStart(std::chrono::system_clock::now())
         , mName(std::move(eventName))
-        , mThresholdInMs(ms){};
+        , mMode(mode)
+        , mMessage(std::move(message))
+        , mThreshold(threshold){};
 
     ~LogSlowExecution()
+    {
+        if (mMode == Mode::AUTOMATIC_RAII)
+        {
+            checkElapsedTime();
+        }
+    }
+
+    std::chrono::milliseconds
+    checkElapsedTime() const
     {
         auto finish = std::chrono::system_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             finish - mStart);
-        auto tooSlow = elapsed.count() > mThresholdInMs;
+        auto tooSlow = elapsed > mThreshold;
 
         LOG_IF(tooSlow, INFO)
-            << mName << " hung for "
+            << "'" << mName << "' " << mMessage << " "
             << static_cast<float>(elapsed.count()) / 1000 << " s";
+        return elapsed;
     }
+
+  private:
+    std::chrono::system_clock::time_point mStart;
+    std::string mName;
+    Mode mMode;
+    std::string mMessage;
+    std::chrono::milliseconds mThreshold;
 };

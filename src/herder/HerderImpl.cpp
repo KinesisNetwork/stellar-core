@@ -11,9 +11,9 @@
 #include "herder/LedgerCloseData.h"
 #include "herder/TxSetFrame.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
-#include "ledger/LedgerStateEntry.h"
-#include "ledger/LedgerStateHeader.h"
+#include "ledger/LedgerTxn.h"
+#include "ledger/LedgerTxnEntry.h"
+#include "ledger/LedgerTxnHeader.h"
 #include "lib/json/json.h"
 #include "main/Application.h"
 #include "main/Config.h"
@@ -336,14 +336,14 @@ HerderImpl::recvTransaction(TransactionFramePtr tx)
     }
 
     {
-        LedgerState ls(mApp.getLedgerStateRoot());
-        if (!tx->checkValid(mApp, ls, highSeq))
+        LedgerTxn ltx(mApp.getLedgerTxnRoot());
+        if (!tx->checkValid(mApp, ltx, highSeq))
         {
             return TX_STATUS_ERROR;
         }
 
-        auto sourceAccount = stellar::loadAccount(ls, tx->getSourceID());
-        if (getAvailableBalance(ls.loadHeader(), sourceAccount) < totFee)
+        auto sourceAccount = stellar::loadAccount(ltx, tx->getSourceID());
+        if (getAvailableBalance(ltx.loadHeader(), sourceAccount) < totFee)
         {
             tx->getResult().result.code(txINSUFFICIENT_BALANCE);
             return TX_STATUS_ERROR;
@@ -377,12 +377,6 @@ HerderImpl::recvSCPEnvelope(SCPEnvelope const& envelope)
             << " i:" << envelope.statement.slotIndex
             << " a:" << mApp.getStateHuman();
 
-    if (envelope.statement.nodeID == getSCP().getLocalNode()->getNodeID())
-    {
-        CLOG(DEBUG, "Herder") << "recvSCPEnvelope: skipping own message";
-        return Herder::ENVELOPE_STATUS_DISCARDED;
-    }
-
     mSCPMetrics.mEnvelopeReceive.Mark();
 
     uint32_t minLedgerSeq = getCurrentLedgerSeq();
@@ -414,6 +408,12 @@ HerderImpl::recvSCPEnvelope(SCPEnvelope const& envelope)
                               << envelope.statement.slotIndex << "( "
                               << minLedgerSeq << "," << maxLedgerSeq << ")";
         return Herder::ENVELOPE_STATUS_DISCARDED;
+    }
+
+    if (envelope.statement.nodeID == getSCP().getLocalNode()->getNodeID())
+    {
+        CLOG(DEBUG, "Herder") << "recvSCPEnvelope: skipping own message";
+        return Herder::ENVELOPE_STATUS_SKIPPED_SELF;
     }
 
     auto status = mPendingEnvelopes.recvSCPEnvelope(envelope);
@@ -509,17 +509,28 @@ HerderImpl::processSCPQueue()
 void
 HerderImpl::processSCPQueueUpToIndex(uint64 slotIndex)
 {
-    while (true)
+    try
     {
-        SCPEnvelope env;
-        if (mPendingEnvelopes.pop(slotIndex, env))
+        while (true)
         {
-            getSCP().receiveEnvelope(env);
+            SCPEnvelope env;
+            if (mPendingEnvelopes.pop(slotIndex, env))
+            {
+                getSCP().receiveEnvelope(env);
+            }
+            else
+            {
+                return;
+            }
         }
-        else
-        {
-            return;
-        }
+    }
+    catch (...)
+    {
+        auto s = getJsonInfo(20).toStyledString();
+        CLOG(FATAL, "Herder") << "Exception processing SCP messages at "
+                              << slotIndex << ", SCP context: " << s;
+
+        throw;
     }
 }
 
@@ -637,7 +648,7 @@ HerderImpl::recvSCPQuorumSet(Hash const& hash, const SCPQuorumSet& qset)
 bool
 HerderImpl::recvTxSet(Hash const& hash, const TxSetFrame& t)
 {
-    TxSetFramePtr txset(new TxSetFrame(t));
+    auto txset = std::make_shared<TxSetFrame>(t);
     return mPendingEnvelopes.recvTxSet(hash, txset);
 }
 

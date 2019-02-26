@@ -6,8 +6,8 @@
 #include "herder/Herder.h"
 #include "herder/HerderImpl.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
-#include "ledger/LedgerStateEntry.h"
+#include "ledger/LedgerTxn.h"
+#include "ledger/LedgerTxnEntry.h"
 #include "lib/catch.hpp"
 #include "main/Application.h"
 #include "main/Config.h"
@@ -59,8 +59,8 @@ TEST_CASE("Flooding", "[flood][overlay]")
         {
             LedgerEntry gen;
             {
-                LedgerState ls(app0->getLedgerStateRoot());
-                gen = stellar::loadAccount(ls, root.getPublicKey()).current();
+                LedgerTxn ltx(app0->getLedgerTxnRoot());
+                gen = stellar::loadAccount(ltx, root.getPublicKey()).current();
             }
 
             for (int i = 0; i < nbTx; i++)
@@ -72,9 +72,9 @@ TEST_CASE("Flooding", "[flood][overlay]")
                 // need to create on all nodes
                 for (auto n : nodes)
                 {
-                    LedgerState ls(n->getLedgerStateRoot(), false);
-                    ls.create(gen);
-                    ls.commit();
+                    LedgerTxn ltx(n->getLedgerTxnRoot(), false);
+                    ltx.create(gen);
+                    ltx.commit();
                 }
             }
         }
@@ -207,9 +207,12 @@ TEST_CASE("Flooding", "[flood][overlay]")
         // a valid transaction set
 
         std::vector<SecretKey> keys;
+        std::unordered_map<PublicKey, SecretKey> keysMap;
         for (int i = 0; i < nbTx; i++)
         {
             keys.emplace_back(SecretKey::random());
+            auto& k = keys.back();
+            keysMap.insert(std::make_pair(k.getPublicKey(), k));
         }
 
         auto injectSCP = [&](int i) {
@@ -256,7 +259,6 @@ TEST_CASE("Flooding", "[flood][overlay]")
             prep.ballot.counter = 1;
             prep.quorumSetHash = qSetHash;
 
-            // use the sources to sign the message
             st.nodeID = keys[i].getPublicKey();
             envelope.signature = keys[i].sign(xdr::xdr_to_opaque(
                 inApp->getNetworkID(), ENVELOPE_TYPE_SCP, st));
@@ -275,16 +277,9 @@ TEST_CASE("Flooding", "[flood][overlay]")
             HerderImpl& herder = *static_cast<HerderImpl*>(&app->getHerder());
             auto state =
                 herder.getSCP().getCurrentState(lcl.header.ledgerSeq + 1);
-            for (auto const& s : keys)
-            {
-                if (std::find_if(
-                        state.begin(), state.end(), [&](SCPEnvelope const& e) {
-                            return e.statement.nodeID == s.getPublicKey();
-                        }) != state.end())
-                {
-                    okCount += 1;
-                }
-            }
+            okCount = std::count_if(state.begin(), state.end(), [&](auto& e) {
+                return keysMap.find(e.statement.nodeID) != keysMap.end();
+            });
             bool res = okCount == sources.size();
             LOG(DEBUG) << app->getConfig().PEER_PORT
                        << (res ? " OK " : " BEHIND ") << okCount << " / "
@@ -298,11 +293,13 @@ TEST_CASE("Flooding", "[flood][overlay]")
             SCPQuorumSet sub;
             for (auto const& k : keys)
             {
-                sub.threshold++;
                 sub.validators.emplace_back(k.getPublicKey());
             }
-            resQSet.threshold++;
+            sub.threshold = static_cast<uint32>(sub.validators.size());
             resQSet.innerSets.emplace_back(sub);
+            // threshold causes all nodes to be stuck on current ledger
+            resQSet.threshold = static_cast<uint32>(resQSet.validators.size() +
+                                                    resQSet.innerSets.size());
             return resQSet;
         };
 
@@ -311,14 +308,14 @@ TEST_CASE("Flooding", "[flood][overlay]")
             SECTION("loopback")
             {
                 simulation =
-                    Topologies::core(4, .666f, Simulation::OVER_LOOPBACK,
+                    Topologies::core(4, 1.0f, Simulation::OVER_LOOPBACK,
                                      networkID, cfgGen, quorumAdjuster);
                 test(injectSCP, ackedSCP);
             }
             SECTION("tcp")
             {
                 simulation =
-                    Topologies::core(4, .666f, Simulation::OVER_TCP, networkID,
+                    Topologies::core(4, 1.0f, Simulation::OVER_TCP, networkID,
                                      cfgGen, quorumAdjuster);
                 test(injectSCP, ackedSCP);
             }

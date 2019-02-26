@@ -6,8 +6,6 @@
 #include "crypto/SignerKey.h"
 #include "database/Database.h"
 #include "main/Application.h"
-#include "medida/meter.h"
-#include "medida/metrics_registry.h"
 #include "transactions/TransactionFrame.h"
 #include "util/XDROperators.h"
 
@@ -35,11 +33,11 @@ BumpSequenceOpFrame::isVersionSupported(uint32_t protocolVersion) const
 }
 
 bool
-BumpSequenceOpFrame::doApply(Application& app, AbstractLedgerState& ls)
+BumpSequenceOpFrame::doApply(Application& app, AbstractLedgerTxn& ltx)
 {
-    LedgerState lsInner(ls);
-    auto header = lsInner.loadHeader();
-    auto sourceAccountEntry = loadSourceAccount(lsInner, header);
+    LedgerTxn ltxInner(ltx);
+    auto header = ltxInner.loadHeader();
+    auto sourceAccountEntry = loadSourceAccount(ltxInner, header);
     auto& sourceAccount = sourceAccountEntry.current().data.account();
     SequenceNumber current = sourceAccount.seqNum;
 
@@ -47,14 +45,11 @@ BumpSequenceOpFrame::doApply(Application& app, AbstractLedgerState& ls)
     if (mBumpSequenceOp.bumpTo > current)
     {
         sourceAccount.seqNum = mBumpSequenceOp.bumpTo;
-        lsInner.commit();
+        ltxInner.commit();
     }
 
     // Return successful results
     innerResult().code(BUMP_SEQUENCE_SUCCESS);
-    app.getMetrics()
-        .NewMeter({"op-bump-sequence", "success", "apply"}, "operation")
-        .Mark();
     return true;
 }
 
@@ -63,9 +58,6 @@ BumpSequenceOpFrame::doCheckValid(Application& app, uint32_t ledgerVersion)
 {
     if (mBumpSequenceOp.bumpTo < 0)
     {
-        app.getMetrics()
-            .NewMeter({"op-bump-sequence", "invalid", "bad-seq"}, "operation")
-            .Mark();
         innerResult().code(BUMP_SEQUENCE_BAD_SEQ);
         return false;
     }

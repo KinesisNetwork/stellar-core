@@ -14,7 +14,7 @@ COPY --from=builder /usr/src/src/stellar-core /usr/local/bin/stellar-core
 
 MAINTAINER Mat Schaffer <mat@stellar.org>
 
-ENV STELLAR_CORE_VERSION 9.1.0-506-14017829
+ENV STELLAR_CORE_VERSION 10.1.0-751-1fe2e8a7
 
 EXPOSE 11625
 EXPOSE 11626

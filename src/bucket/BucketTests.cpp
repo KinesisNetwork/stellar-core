@@ -16,8 +16,8 @@
 #include "database/Database.h"
 #include "herder/LedgerCloseData.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
 #include "ledger/LedgerTestUtils.h"
+#include "ledger/LedgerTxn.h"
 #include "lib/catch.hpp"
 #include "main/Application.h"
 #include "medida/meter.h"
@@ -615,19 +615,21 @@ clearFutures(Application::pointer app, BucketList& bl)
     size_t waiting = 0, finished = 0;
     for (size_t i = 0; i < n; ++i)
     {
-        app->postOnBackgroundThread([&] {
-            std::unique_lock<std::mutex> lock(mutex);
-            if (++waiting == n)
-            {
-                cv.notify_all();
-            }
-            else
-            {
-                cv.wait(lock, [&] { return waiting == n; });
-            }
-            ++finished;
-            cv2.notify_one();
-        });
+        app->postOnBackgroundThread(
+            [&] {
+                std::unique_lock<std::mutex> lock(mutex);
+                if (++waiting == n)
+                {
+                    cv.notify_all();
+                }
+                else
+                {
+                    cv.wait(lock, [&] { return waiting == n; });
+                }
+                ++finished;
+                cv2.notify_one();
+            },
+            "BucketTests: clearFutures");
     }
     {
         std::unique_lock<std::mutex> lock(mutex);
@@ -1058,7 +1060,7 @@ TEST_CASE("bucket apply", "[bucket]")
                          << " live entries";
     birth->apply(*app);
     {
-        auto count = app->getLedgerStateRoot().countObjects(ACCOUNT);
+        auto count = app->getLedgerTxnRoot().countObjects(ACCOUNT);
         REQUIRE(count == live.size() + 1 /* root account */);
     }
 
@@ -1066,7 +1068,7 @@ TEST_CASE("bucket apply", "[bucket]")
                          << " dead entries";
     death->apply(*app);
     {
-        auto count = app->getLedgerStateRoot().countObjects(ACCOUNT);
+        auto count = app->getLedgerTxnRoot().countObjects(ACCOUNT);
         REQUIRE(count == 1 /* root account */);
     }
 }

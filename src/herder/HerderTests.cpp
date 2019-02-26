@@ -16,8 +16,8 @@
 #include "database/Database.h"
 #include "ledger/LedgerHeaderUtils.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
-#include "ledger/LedgerStateHeader.h"
+#include "ledger/LedgerTxn.h"
+#include "ledger/LedgerTxnHeader.h"
 #include "lib/catch.hpp"
 #include "main/CommandHandler.h"
 #include "overlay/OverlayManager.h"
@@ -27,8 +27,6 @@
 
 using namespace stellar;
 using namespace stellar::txtest;
-
-typedef std::unique_ptr<Application> appPtr;
 
 TEST_CASE("standalone", "[herder]")
 {
@@ -138,8 +136,8 @@ TEST_CASE("standalone", "[herder]")
 
                 bool hasC = false;
                 {
-                    LedgerState ls(app->getLedgerStateRoot());
-                    hasC = ls.loadHeader().current().ledgerVersion >= 10;
+                    LedgerTxn ltx(app->getLedgerTxnRoot());
+                    hasC = ltx.loadHeader().current().ledgerVersion >= 10;
                 }
                 if (hasC)
                 {
@@ -376,8 +374,8 @@ TEST_CASE("surge", "[herder]")
     app->start();
 
     {
-        LedgerState ls(app->getLedgerStateRoot());
-        ls.loadHeader().current().maxTxSetSize =
+        LedgerTxn ltx(app->getLedgerTxnRoot());
+        ltx.loadHeader().current().maxTxSetSize =
             cfg.TESTING_UPGRADE_MAX_TX_PER_LEDGER;
     }
 
@@ -514,8 +512,8 @@ TEST_CASE("SCP Driver", "[herder]")
     app->start();
 
     {
-        LedgerState ls(app->getLedgerStateRoot());
-        ls.loadHeader().current().maxTxSetSize =
+        LedgerTxn ltx(app->getLedgerTxnRoot());
+        ltx.loadHeader().current().maxTxSetSize =
             cfg.TESTING_UPGRADE_MAX_TX_PER_LEDGER;
     }
 
@@ -1073,7 +1071,8 @@ TEST_CASE("In quorum filtering", "[herder]")
         {
             qSetK[i].validators.emplace_back(extraK[1].getPublicKey());
         }
-        sim->addNode(extraK[i], qSetK[i]);
+        auto node = sim->addNode(extraK[i], qSetK[i]);
+        node->start();
         sim->addConnection(extraK[i].getPublicKey(), nodeIDs[0]);
     }
 
@@ -1123,7 +1122,9 @@ TEST_CASE("In quorum filtering", "[herder]")
     node3Config.QUORUM_SET.validators.emplace_back(extraK[2].getPublicKey());
     node3Config.QUORUM_SET.validators.emplace_back(extraK[3].getPublicKey());
 
-    sim->addNode(node3Config.NODE_SEED, node3Config.QUORUM_SET, &node3Config);
+    auto node3 = sim->addNode(node3Config.NODE_SEED, node3Config.QUORUM_SET,
+                              &node3Config);
+    node3->start();
 
     // connect it back to the core nodes
     for (int i = 0; i < 3; i++)

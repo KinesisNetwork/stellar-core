@@ -5,13 +5,11 @@
 #include "ChangeTrustOpFrame.h"
 #include "database/Database.h"
 #include "ledger/LedgerManager.h"
-#include "ledger/LedgerState.h"
-#include "ledger/LedgerStateEntry.h"
-#include "ledger/LedgerStateHeader.h"
+#include "ledger/LedgerTxn.h"
+#include "ledger/LedgerTxnEntry.h"
+#include "ledger/LedgerTxnHeader.h"
 #include "ledger/TrustLineWrapper.h"
 #include "main/Application.h"
-#include "medida/meter.h"
-#include "medida/metrics_registry.h"
 #include "transactions/TransactionUtils.h"
 
 namespace stellar
@@ -26,9 +24,9 @@ ChangeTrustOpFrame::ChangeTrustOpFrame(Operation const& op,
 }
 
 bool
-ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
+ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerTxn& ltx)
 {
-    auto header = ls.loadHeader();
+    auto header = ltx.loadHeader();
     auto issuerID = getIssuer(mChangeTrust.line);
 
     if (header.current().ledgerVersion > 2)
@@ -40,10 +38,6 @@ ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
         if (issuerID == getSourceID())
         {
             // since version 3 it is not allowed to use CHANGE_TRUST on self
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "trust-self"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_SELF_NOT_ALLOWED);
             return false;
         }
@@ -52,19 +46,11 @@ ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
     {
         if (mChangeTrust.limit < INT64_MAX)
         {
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "invalid-limit"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_INVALID_LIMIT);
             return false;
         }
-        else if (!stellar::loadAccountWithoutRecord(ls, issuerID))
+        else if (!stellar::loadAccountWithoutRecord(ltx, issuerID))
         {
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "no-issuer"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_NO_ISSUER);
             return false;
         }
@@ -75,16 +61,12 @@ ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
     key.trustLine().accountID = getSourceID();
     key.trustLine().asset = mChangeTrust.line;
 
-    auto trustLine = ls.load(key);
+    auto trustLine = ltx.load(key);
     if (trustLine)
     { // we are modifying an old trustline
         if (mChangeTrust.limit < getMinimumLimit(header, trustLine))
         {
             // Can't drop the limit below the balance you are holding with them
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "invalid-limit"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_INVALID_LIMIT);
             return false;
         }
@@ -93,26 +75,19 @@ ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
         {
             // line gets deleted
             trustLine.erase();
-            auto sourceAccount = loadSourceAccount(ls, header);
+            auto sourceAccount = loadSourceAccount(ltx, header);
             addNumEntries(header, sourceAccount, -1);
         }
         else
         {
-            auto issuer = stellar::loadAccountWithoutRecord(ls, issuerID);
+            auto issuer = stellar::loadAccountWithoutRecord(ltx, issuerID);
             if (!issuer)
             {
-                app.getMetrics()
-                    .NewMeter({"op-change-trust", "failure", "no-issuer"},
-                              "operation")
-                    .Mark();
                 innerResult().code(CHANGE_TRUST_NO_ISSUER);
                 return false;
             }
             trustLine.current().data.trustLine().limit = mChangeTrust.limit;
         }
-        app.getMetrics()
-            .NewMeter({"op-change-trust", "success", "apply"}, "operation")
-            .Mark();
         innerResult().code(CHANGE_TRUST_SUCCESS);
         return true;
     }
@@ -120,31 +95,19 @@ ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
     { // new trust line
         if (mChangeTrust.limit == 0)
         {
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "invalid-limit"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_INVALID_LIMIT);
             return false;
         }
-        auto issuer = stellar::loadAccountWithoutRecord(ls, issuerID);
+        auto issuer = stellar::loadAccountWithoutRecord(ltx, issuerID);
         if (!issuer)
         {
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "no-issuer"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_NO_ISSUER);
             return false;
         }
 
-        auto sourceAccount = loadSourceAccount(ls, header);
+        auto sourceAccount = loadSourceAccount(ltx, header);
         if (!addNumEntries(header, sourceAccount, 1))
         {
-            app.getMetrics()
-                .NewMeter({"op-change-trust", "failure", "low-reserve"},
-                          "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_LOW_RESERVE);
             return false;
         }
@@ -160,11 +123,8 @@ ChangeTrustOpFrame::doApply(Application& app, AbstractLedgerState& ls)
         {
             tl.flags = AUTHORIZED_FLAG;
         }
-        ls.create(trustLineEntry);
+        ltx.create(trustLineEntry);
 
-        app.getMetrics()
-            .NewMeter({"op-change-trust", "success", "apply"}, "operation")
-            .Mark();
         innerResult().code(CHANGE_TRUST_SUCCESS);
         return true;
     }
@@ -175,20 +135,11 @@ ChangeTrustOpFrame::doCheckValid(Application& app, uint32_t ledgerVersion)
 {
     if (mChangeTrust.limit < 0)
     {
-        app.getMetrics()
-            .NewMeter(
-                {"op-change-trust", "invalid", "malformed-negative-limit"},
-                "operation")
-            .Mark();
         innerResult().code(CHANGE_TRUST_MALFORMED);
         return false;
     }
     if (!isAssetValid(mChangeTrust.line))
     {
-        app.getMetrics()
-            .NewMeter({"op-change-trust", "invalid", "malformed-invalid-asset"},
-                      "operation")
-            .Mark();
         innerResult().code(CHANGE_TRUST_MALFORMED);
         return false;
     }
@@ -196,11 +147,6 @@ ChangeTrustOpFrame::doCheckValid(Application& app, uint32_t ledgerVersion)
     {
         if (mChangeTrust.line.type() == ASSET_TYPE_NATIVE)
         {
-            app.getMetrics()
-                .NewMeter(
-                    {"op-change-trust", "invalid", "malformed-native-asset"},
-                    "operation")
-                .Mark();
             innerResult().code(CHANGE_TRUST_MALFORMED);
             return false;
         }

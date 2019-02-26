@@ -84,6 +84,8 @@ HerderSCPDriver::lostSync()
 Herder::State
 HerderSCPDriver::getState() const
 {
+    // we're only returning "TRACKING" when we're tracking the actual network
+    // (mLastTrackingSCP is also set when this happens)
     return mTrackingSCP && mLastTrackingSCP ? Herder::HERDER_TRACKING_STATE
                                             : Herder::HERDER_SYNCING_STATE;
 }
@@ -251,8 +253,10 @@ HerderSCPDriver::validateValueHelper(uint64_t slotIndex,
             CLOG(ERROR, "Herder")
                 << "HerderSCPDriver::validateValue"
                 << " i: " << slotIndex
-                << " processing a future message while tracking; got: "
-                << nextConsensusLedgerIndex();
+                << " processing a future message while tracking "
+                << "(tracking: " << mTrackingSCP->mConsensusIndex << ", last: "
+                << (mLastTrackingSCP ? mLastTrackingSCP->mConsensusIndex : 0)
+                << " ) ";
             return SCPDriver::kInvalidValue;
         }
 
@@ -434,6 +438,25 @@ HerderSCPDriver::getValueString(Value const& v) const
 }
 
 // timer handling
+void
+HerderSCPDriver::timerCallbackWrapper(uint64_t slotIndex, int timerID,
+                                      std::function<void()> cb)
+{
+    // reschedule timers for future slots when tracking
+    if (trackingSCP() && nextConsensusLedgerIndex() != slotIndex)
+    {
+        CLOG(WARNING, "Herder")
+            << "Herder rescheduled timer " << timerID << " for slot "
+            << slotIndex << " with next slot " << nextConsensusLedgerIndex();
+        setupTimer(slotIndex, timerID, std::chrono::seconds(1),
+                   std::bind(&HerderSCPDriver::timerCallbackWrapper, this,
+                             slotIndex, timerID, cb));
+    }
+    else
+    {
+        cb();
+    }
+}
 
 void
 HerderSCPDriver::setupTimer(uint64_t slotIndex, int timerID,
@@ -460,7 +483,9 @@ HerderSCPDriver::setupTimer(uint64_t slotIndex, int timerID,
     if (cb)
     {
         timer.expires_from_now(timeout);
-        timer.async_wait(cb, &VirtualTimer::onFailureNoop);
+        timer.async_wait(std::bind(&HerderSCPDriver::timerCallbackWrapper, this,
+                                   slotIndex, timerID, cb),
+                         &VirtualTimer::onFailureNoop);
     }
 }
 
@@ -591,10 +616,12 @@ HerderSCPDriver::combineCandidates(uint64_t slotIndex,
                                 << " invalid transactions";
 
         // post to avoid triggering SCP handling code recursively
-        mApp.postOnMainThreadWithDelay([this, bestTxSet]() {
-            mPendingEnvelopes.recvTxSet(bestTxSet->getContentsHash(),
-                                        bestTxSet);
-        });
+        mApp.postOnMainThreadWithDelay(
+            [this, bestTxSet]() {
+                mPendingEnvelopes.recvTxSet(bestTxSet->getContentsHash(),
+                                            bestTxSet);
+            },
+            "HerderSCPDriver: combineCandidates posts recvTxSet");
     }
 
     return xdr::xdr_to_opaque(comp);
