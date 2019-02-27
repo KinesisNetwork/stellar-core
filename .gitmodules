@@ -10,3 +10,6 @@
 [submodule "lib/cereal"]
 	path = lib/cereal
 	url = https://github.com/USCiLab/cereal
+[submodule "lib/asio"]
+	path = lib/asio
+	url = git@github.com:chriskohlhoff/asio.git
