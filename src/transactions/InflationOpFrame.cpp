@@ -69,7 +69,7 @@ InflationOpFrame::doApply(Application& app, AbstractLedgerTxn& ltx)
     int64 toDoleThisWinner = amountToDole;
     int64 leftAfterDole = amountToDole;
 
-    auto winner = stellar::loadAccount(ls, feeDestination);
+    auto winner = stellar::loadAccount(ltx, feeDestination);
     if (winner)
     {
         leftAfterDole -= toDoleThisWinner;
