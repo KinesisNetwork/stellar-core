@@ -53,7 +53,7 @@ using namespace std;
 
 bool Database::gDriversRegistered = false;
 
-static unsigned long const SCHEMA_VERSION = 7;
+static unsigned long const SCHEMA_VERSION = 6;
 
 static void
 setSerializable(soci::session& sess)
