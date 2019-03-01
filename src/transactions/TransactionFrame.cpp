@@ -288,7 +288,7 @@ TransactionFrame::commonValid(SignatureChecker& signatureChecker,
         }
     }
 
-    if (mEnvelope.tx.fee < getMinFee(lm))
+    if (mEnvelope.tx.fee < getMinFee(lm) && mEnvelope.tx.fee < lm.getMaxTxFee())
     {
         app.getMetrics()
             .NewMeter({"transaction", "invalid", "insufficient-fee"},

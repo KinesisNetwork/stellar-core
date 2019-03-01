@@ -27,6 +27,7 @@ apt-get autoremove -y
 
 # put back 2 needed awscli packages
 apt-get install -y python-six python-colorama
+pip install awscli --ignore-installed six
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*

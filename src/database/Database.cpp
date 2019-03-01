@@ -495,4 +495,4 @@ DBTimeExcluder::~DBTimeExcluder()
     auto deltaT = mApp.getClock().now() - mStartTotalTime;
     mApp.getDatabase().excludeTime(deltaQ, deltaT);
 }
-}
+} // namespace stellar
